@@ -1,0 +1,28 @@
+{
+  "name": "subtool",
+  "version": "0.1.0",
+  "description": "A command-line tool for working with voltage capture files for the Murchison Widefield Array.",
+  "main": "app.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/shmookey/subtool.git"
+  },
+  "keywords": [
+    "mwa",
+    "mwax",
+    "subfile"
+  ],
+  "author": "Luke A. Williams",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/shmookey/subtool/issues"
+  },
+  "homepage": "https://github.com/shmookey/subtool#readme",
+  "devDependencies": {
+    "@types/node": "^18.7.21",
+    "typescript": "^4.8.3"
+  }
+}
