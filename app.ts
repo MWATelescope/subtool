@@ -3,8 +3,9 @@ import { parseCommandLine } from './cli.js'
 import * as dt from './dt.js'
 import * as dump from './dump.js'
 import { load_subfile, write_subfile } from './subfile.js'
-import { read_section, initMetadata, parse_header } from './util.js'
+import { read_section, initMetadata, parse_header, read_block } from './util.js'
 import type { Metadata, OutputDescriptor, SourceMap } from './types'
+import { FileHandle } from 'node:fs/promises'
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
 // MODE                NO_CAPTURE           UTC_START           2022-08-02-06:42:46  OBS_OFFSET          80                   NBIT                8
@@ -61,7 +62,7 @@ async function main(args) {
 }
 
 async function runShow(filename, opts) {
-  const file = await fs.open(filename, 'r')
+  const file: FileHandle = await fs.open(filename, 'r')
   const loadResult = await load_subfile(filename)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
@@ -120,23 +121,24 @@ async function runShow(filename, opts) {
     for(let i=0; i<tiles.length; i++)
       selected_ids.push(i)
   }
-  const blockLength = meta.num_sources * meta.sub_line_size
-  const block1Buf = new ArrayBuffer(blockLength)
-  const block1 = new Int8Array(block1Buf)
-  result = await file.read(new Uint8Array(block1Buf), 0, blockLength, 4096 + blockLength)
-
-  if(result.bytesRead != blockLength)
-    return {status: 'err', reason: `Failed to read sample data. Expected to read ${blockLength} bytes, got ${result.bytesRead}`}
-
+  
+  const dataBlockResult: any = await read_block(opts.show_block, file, meta)
+  if(dataBlockResult.status != 'ok')
+    return dataBlockResult
+  
+  const dataBlock = new Int8Array(dataBlockResult.buf)
+  const nSamples = Math.min(meta.samples_per_line, opts.num_samples)
   for(let i of selected_ids) {
-    const xs = block1.subarray(i*meta.sub_line_size, (i+1)*meta.sub_line_size)
-    let str = tiles[i].rf_input.toString().padStart(4, ' ') + '  '
-    for(let j=0; j<opts.num_samples; j++) {
+    const xs = dataBlock.subarray(i*meta.sub_line_size, (i+1)*meta.sub_line_size)
+    let str = 
+    process.stdout.write(`${tiles[i].rf_input.toString().padStart(4, ' ')} `)
+    for(let j=0; j<nSamples; j++) {
       let [re, im] = [xs[j*2], xs[j*2+1]]
       let [reStr, imStr] = [`${re}`, im >= 0 ? `+${im}` : `${im}`]
-      str = str + `${reStr}${imStr}i `.padStart(8, ' ')
+      process.stdout.write(`${reStr}${imStr}i `.padStart(8, ' '))
     }
-    console.log(str)
+    process.stdout.write('\n')
+    //console.log(str)
   }
 
   await file.close()

@@ -23,6 +23,7 @@ format, or export as CSV or binary.
   --frac-delays=N         Output only the first N fractional delays.
   --samples=N             Output only the first N samples per source.
   --source=A[,B...]       Output only the specified RF sources.
+  --block=N               Output voltage data from block N (default: 1).
   --format=FMT            Output format (default: pretty)
                             pretty   Table aligned values with headings.
                             csv      Comma-separated values.
@@ -110,6 +111,10 @@ const schema = {
         type: "uint-list",
         prop: "selected_sources",
       },
+      "--block": {
+        type: "uint",
+        prop: "show_block",
+      },
       "--samples": {
         type: "uint",
         prop: "num_samples",
@@ -132,6 +137,7 @@ const schema = {
       num_samples: null,
       num_frac_delays: null,
       format_out: "pretty",
+      show_block: 1,
     }
   },
   dt: {
