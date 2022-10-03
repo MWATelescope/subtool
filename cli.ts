@@ -1,6 +1,6 @@
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
-Available commands: info, show, repoint, dt, dump
+Available commands: info, show, repoint, replace, dt, dump
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -39,6 +39,16 @@ subfile as output.
   --apply=PATH            Load the delay table to be applied from a file.
   --zero                  Remove all existing delays.
   --force                 Apply delays even if it would cause data loss.
+
+REPLACE DATA COMMAND (replace)
+Write a new subfile, replacing voltage data from specified sources with data
+from other sources.
+
+      subtool replace [replace_opts] <INPUT_FILE> <OUTPUT_FILE>
+
+  INPUT_FILE              Path to input subfile.
+  OUTPUT_FILE             Path to write output subfile.
+  --map=A:B[,C:D...]      Voltages for source A taken from B's data.
 
 DELAY TABLE COMMAND (dt)
 Read and write delay table files, select subsets and compare between them.
@@ -185,6 +195,18 @@ const schema = {
       force_delays: false,
     },
   },
+  replace: {
+    args: ["INPUT_FILE", "OUTPUT_FILE"],
+    opts: {
+      "--map": {
+        type: "mapping-list",
+        prop: "replace_map",
+      },
+    },
+    defaults: {
+      replace_map: null,
+    },
+  },
   info: {
     args: ["FILE"],
     opts: {
@@ -246,6 +268,15 @@ function parseVal(str, shape) {
     break
   case 'string':
     val = str
+    break
+  case 'mapping-list':
+    val = []
+    const re = RegExp(/^[0-9]+$/)
+    const strPairs: string[][] = str.split(',').map(mapstr => mapstr.split(':'))
+    if(!( strPairs.every(pair => pair.length == 2) && 
+          strPairs.every(([a,b]) => re.test(a) && re.test(b))))
+      return {status: 'invalid'}
+    val = strPairs.map(([k,v]) => [Number.parseInt(k), Number.parseInt(v)])
     break
   default:
       throw `Invalid argument type ${shape.type}`

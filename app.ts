@@ -4,6 +4,7 @@ import * as dt from './dt.js'
 import * as dump from './dump.js'
 import { load_subfile, write_subfile } from './subfile.js'
 import { read_section, initMetadata, parse_header } from './util.js'
+import type { Metadata, OutputDescriptor, SourceMap } from './types'
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
 // MODE                NO_CAPTURE           UTC_START           2022-08-02-06:42:46  OBS_OFFSET          80                   NBIT                8
@@ -48,9 +49,15 @@ async function main(args) {
     return dump.runDump(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case 'repoint':
     return runRepoint(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
+  case 'replace':
+    return runReplace(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case null:
-      return
+    return {status: 'ok'}
+  default:
+    console.error(`${parseResult.command} is not implemented.`)
+    break
   }
+  return {status: 'ok'}
 }
 
 async function runShow(filename, opts) {
@@ -133,6 +140,8 @@ async function runShow(filename, opts) {
   }
 
   await file.close()
+
+  return {status: 'ok'}
 }
 
 async function runDt(filename, opts) {
@@ -166,6 +175,8 @@ async function runDt(filename, opts) {
   } else {
     dt.print_delay_table(table, loadResult.binaryBuffer, opts, meta)
   }
+
+  return {status: 'ok'}
 }
 
 async function runInfo(filename, opts) {
@@ -178,6 +189,8 @@ async function runInfo(filename, opts) {
   Object.entries(meta).forEach(([k, v]) => {
     console.log(`${k}: ${v}`)
   })
+
+  return {status: 'ok'}
 }
 
 
@@ -230,15 +243,60 @@ async function runRepoint(infilename, outfilename, opts) {
       data: { file, type: 'file' },
     },
   }
-  const result = await write_subfile(outputDescriptor, opts)
-  //const {file, meta} = loadResult
+  const writeResult = await write_subfile(outputDescriptor, opts)
+  if(writeResult.status != 'ok')
+    return writeResult
 
+  return {status: 'ok'}
+}
+
+async function runReplace(infilename: string, outfilename: string, opts) {
+  const loadResult = await load_subfile(infilename)
+  if(loadResult.status != 'ok') {
+    console.error(loadResult.reason)
+    return
+  }
+  const {file, meta} = loadResult
+
+  const headerResult = await read_section('header', file, meta)
+  const dtResult =     await read_section('dt', file, meta)
+  const udpmapResult = await read_section('udpmap', file, meta)
+  const marginResult = await read_section('margin', file, meta)
+  if(headerResult.status != 'ok') return headerResult
+  if(dtResult.status != 'ok') return dtResult
+  if(udpmapResult.status != 'ok') return udpmapResult
+  if(marginResult.status != 'ok') return marginResult
+
+  const origMap: SourceMap = Object.fromEntries(meta.sources.map((x, i) => [x, i]))
+  const remap: SourceMap = Object.fromEntries(meta.sources.map((x, i) => [x, i]))
+  for(let [k,v] of opts.replace_map)
+    remap[k] = origMap[v]
+  
+  
+  const outputMeta = { ...meta, filename: outfilename}
+  const outputDescriptor = {
+    meta: outputMeta,
+    remap,
+    sections: {
+      header: { content: headerResult.buf, type: 'buffer' },
+      dt: { content: dtResult.buf, type: 'buffer' },
+      udpmap: { content: udpmapResult.buf, type: 'buffer' },
+      margin: { content: marginResult.buf, type: 'buffer' },
+      data: { file, type: 'file' },
+    },
+  }
+  const writeResult = await write_subfile(outputDescriptor, opts)
+  if(writeResult.status != 'ok')
+    return writeResult
+
+  return {status: 'ok'}
 }
 
 
 
-
-
-main(process.argv.slice(2)) /*.catch(e => {
+const result: any = await main(process.argv.slice(2)) /*.catch(e => {
   console.error(`ERROR: ${e}`)
 })*/
+
+if(result.status != 'ok')
+  console.log(`\nsubtool failed with status '${result.status}'. Reason: ${result.reason}`)

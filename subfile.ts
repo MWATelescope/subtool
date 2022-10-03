@@ -68,7 +68,7 @@ import { FileHandle } from 'fs/promises'
 import * as dt from './dt.js'
 import { initMetadata, read_header, read_block } from './util.js'
 import * as rp from './repoint.js'
-import type { Metadata, OutputDescriptor } from './types'
+import type { Metadata, OutputDescriptor, SourceMap } from './types'
 
 /** Load a subfile, gather basic info. */
 export async function load_subfile(filename: string) {
@@ -133,7 +133,7 @@ export async function load_subfile(filename: string) {
 
 /** Write out a subfile given an output descriptor. */
 export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
-  const { meta, repoint, sections } = output_descriptor
+  const { meta, repoint, remap, sections } = output_descriptor
   let bytesWritten: number = 0
   // Create a buffer to hold the preamble: header + block 0
   // This way we can use the exact offsets as given in the metadata.
@@ -148,19 +148,31 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
   bytesWritten += preamble.byteLength
   process.stderr.write('Writing blocks... ')
   if(sections.data) {
-    if(sections.data.remap) {
-    // To support remapping data streams, we introduce a layer of indirection.
-    //const srcMap = meta.
-    }
-    
-    if(repoint) {
+    if(remap) {
+      // To support remapping data streams, we introduce a layer of indirection.
+      // Create a map of source IDs to index based on order of appearance.
+      const srcMap: SourceMap = remap // Object.fromEntries(meta.sources.map((x, i) => [x, i]))
+      const outBlockBuf = new ArrayBuffer(meta.block_length)
+      const outputBlock = new Uint16Array(outBlockBuf)
+      for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
+        const blockResult = await read_block(blockNum, sections.data.file, meta)
+        if(blockResult.status != 'ok')
+          return blockResult
+        const inputBlock = new Uint16Array(blockResult.buf)
+        copy_block_with_remapping(inputBlock, outputBlock, srcMap, meta.sources, meta)
+        await file.write(Buffer.from(outBlockBuf))
+        outputBlock.fill(0)
+        bytesWritten += outBlockBuf.byteLength
+        process.stderr.write(`${blockNum} `)
+       }
+    } else if(repoint) {
       const repointResult: any = await rp.write_time_shifted_data(repoint.from, repoint.to, repoint.margin, sections.data.file, file, meta)
       if(repointResult.status != 'ok')
         return repointResult
       bytesWritten += repointResult.bytesWritten
     } else {  
      for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
-       const blockResult = await read_block(blockNum+1, sections.data.file, meta)
+       const blockResult = await read_block(blockNum, sections.data.file, meta)
        if(blockResult.status != 'ok')
          return blockResult
        await file.write(Buffer.from(blockResult.buf))
@@ -173,4 +185,14 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
 
   file.close()
   return { status: 'ok', bytesWritten }
+}
+
+function copy_block_with_remapping(inBlk: Uint16Array, outBlk: Uint16Array, map: SourceMap, outputSources: number[], meta: Metadata) {
+  for(let outputLineIndex=0; outputLineIndex < outputSources.length; outputLineIndex++) {
+    const source = outputSources[outputLineIndex]
+    const inputLineIndex = map[source]
+    const inputLine = rp.get_line(inputLineIndex, inBlk, meta)
+    const outputLine = rp.get_line(outputLineIndex, outBlk, meta)
+    outputLine.set(inputLine)
+  }
 }

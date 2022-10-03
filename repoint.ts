@@ -121,7 +121,7 @@ export async function write_time_shifted_data(from, to, margin, infile, outfile,
         const prevLine = srcPrev.subarray(rfSourceId * SAMPLES_PER_LINE, (rfSourceId+1) * SAMPLES_PER_LINE)
         srcHead = prevLine.subarray(-headLength)
       } else {
-        const headMargin = getMargin(rfSourceId, marginData, meta, true)
+        const headMargin = get_margin(rfSourceId, marginData, meta, true)
         srcHead = headMargin.subarray(MARGIN_SAMPLES/2 - N - M - 1, MARGIN_SAMPLES/2 - M - 1)
       }
       dstHead.set(srcHead)
@@ -132,7 +132,7 @@ export async function write_time_shifted_data(from, to, margin, infile, outfile,
         const nextLine = srcNext.subarray(rfSourceId * SAMPLES_PER_LINE, (rfSourceId+1) * SAMPLES_PER_LINE)
         srcTail = nextLine.subarray(0, tailLength)
       } else {
-        const tailMargin = getMargin(rfSourceId, marginData, meta, false)
+        const tailMargin = get_margin(rfSourceId, marginData, meta, false)
         srcTail = tailMargin.subarray(MARGIN_SAMPLES/2 - M + 1, MARGIN_SAMPLES/2 - N - M + 1)
       }
       dstTail.set(srcTail)
@@ -142,27 +142,25 @@ export async function write_time_shifted_data(from, to, margin, infile, outfile,
 }
 
 /** Get the head or tail margin samples for a given source ID. */
-export function getMargin(id: number, data: Uint16Array, meta: Metadata, getHead=true) {
+export function get_margin(id: number, data: Uint16Array, meta: Metadata, getHead=true) {
   const sz = meta.margin_samples
   const offset = getHead ? 0 : sz
   return data.subarray(id*sz*2 + offset, id*sz*2 + offset + sz)
 }
 
 /** Get a whole block from the data section. */
-export function getBlock(id: number, data: Uint16Array, meta: Metadata) {
+export function get_block(id: number, data: Uint16Array, meta: Metadata) {
   const sz = meta.samples_per_line * meta.num_sources
   return data.subarray(id * sz, (id+1) * sz)
 }
 
 /** Get a single line from a block. */
-export function getLine(id: number, blockData: Uint16Array, meta: Metadata) {
+export function get_line(id: number, blockData: Uint16Array, meta: Metadata) {
   return blockData.subarray(id * meta.samples_per_line, (id+1) * meta.samples_per_line)
 }
 
 /** Get a single line from a given block number in the data section. */ 
-export function getLineInBlock(lineId: number, blockId: number, data: Uint16Array, params) {
-  return getLine(lineId, getBlock(blockId, data, params), params)
+export function get_line_in_block(lineId: number, blockId: number, data: Uint16Array, params) {
+  return get_line(lineId, get_block(blockId, data, params), params)
 }
 
-export function getDataSection(buf, meta) {
-}

@@ -40,6 +40,7 @@ export type Metadata = {
 export type OutputDescriptor = {
   meta: Metadata;
   repoint?: RepointDescriptor;
+  remap?: SourceMap;
   sections: SectionDescriptorList;
 }
 
@@ -53,7 +54,6 @@ export type SectionDescriptor = {
   content?: ArrayBuffer;
   file?: FileHandle;
   type: string;
-  remap?: any;
 }
 
 export type SectionDescriptorList = {
@@ -72,4 +72,8 @@ export type DelayTableEntry = {
   delta_delta_delay: number; 
   num_pointings: number;
   frac_delay: Int16Array;
+}
+
+export type SourceMap = {
+  [k: number]: number;
 }

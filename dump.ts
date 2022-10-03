@@ -34,6 +34,8 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
   const buf = result.buf
   await fs.writeFile(outfilename, new Uint8Array(buf))
   console.warn(`Wrote ${buf.byteLength} bytes to ${outfilename}`)
+
+  return {status: 'ok'}
 }
 
 async function dump_preamble(outfilename: string, file: FileHandle, meta: Metadata) {
