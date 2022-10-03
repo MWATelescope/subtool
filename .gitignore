@@ -1,5 +1,4 @@
-*.js
-*.js.map
 .*.swp
 .vscode
 node_modules/
+build/

@@ -5,6 +5,7 @@
   "description": "A command-line tool for working with voltage capture files for the Murchison Widefield Array.",
   "main": "app.mjs",
   "scripts": {
+    "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
