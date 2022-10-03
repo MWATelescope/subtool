@@ -1,10 +1,10 @@
 import * as fs from 'node:fs/promises'
-import { parseCommandLine } from './cli.mjs'
-import * as dt from './dt.mjs'
-import * as layout from './layout.mjs'
-import * as dump from './dump.mjs'
-import { load_subfile } from './subfile.mjs'
-import { read_block, read_section, initMetadata, parse_header } from './util.mjs'
+import { parseCommandLine } from './cli.js'
+import * as dt from './dt.js'
+import * as layout from './layout.js'
+import * as dump from './dump.js'
+import { load_subfile } from './subfile.js'
+import { read_block, read_section, initMetadata, parse_header } from './util.js'
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
 // MODE                NO_CAPTURE           UTC_START           2022-08-02-06:42:46  OBS_OFFSET          80                   NBIT                8
@@ -93,7 +93,7 @@ async function runShow(filename, opts) {
     tiles.push(tile)
   }
   if(opts.show_delay_table)
-    dt.print_delay_table(tiles, delayTableBuf, opts)
+    dt.print_delay_table(tiles, delayTableBuf, opts, meta)
 
   // Read voltages
   if(!opts.show_data) {
@@ -141,7 +141,7 @@ async function runDt(filename, opts) {
   meta.filename = filename
   meta.num_sources = opts.num_sources_in
   meta.num_frac_delays = opts.num_frac_delays_in
-  const loadResult = await dt.load_delay_table(filename, opts, meta)
+  const loadResult: any = await dt.load_delay_table(filename, opts, meta)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
     return
@@ -149,7 +149,7 @@ async function runDt(filename, opts) {
   const table = loadResult.table
   if(opts.compare_file) {
     
-    const loadCmpResult = await dt.load_delay_table(opts.compare_file, opts, meta)
+    const loadCmpResult: any = await dt.load_delay_table(opts.compare_file, opts, meta)
     if(loadCmpResult.status != 'ok') {
       console.error(loadCmpResult.reason)
       return
@@ -162,10 +162,10 @@ async function runDt(filename, opts) {
       console.log(diffResult.reason)
       return
     }
-    dt.print_delay_table(diffResult.table, null, opts)
+    dt.print_delay_table(diffResult.table, null, opts, meta)
     
   } else {
-    dt.print_delay_table(table, loadResult.binaryBuffer, opts)
+    dt.print_delay_table(table, loadResult.binaryBuffer, opts, meta)
   }
 }
 
@@ -201,12 +201,12 @@ async function runRepoint(infilename, outfilename, opts) {
 
   const dtMeta = initMetadata()
   dtMeta.filename = opts.delay_table_filename
-  const loadDtResult = await dt.load_delay_table(opts.delay_table_filename, {format_in: 'auto'}, dtMeta)
+  const loadDtResult: any = await dt.load_delay_table(opts.delay_table_filename, {format_in: 'auto'}, dtMeta)
   if(loadDtResult.status != 'ok') {
     console.error(loadDtResult.reason)
     return
   }
-  const origDtResult = dt.parse_delay_table_binary(dtResult.buf, {}, meta)
+  const origDtResult: any = dt.parse_delay_table_binary(dtResult.buf, meta)
   if(origDtResult.status != 'ok') {
     console.error(origDtResult.reason)
     return
@@ -231,7 +231,7 @@ async function runRepoint(infilename, outfilename, opts) {
       data: { file, type: 'file' },
     },
   }
-  const result = await layout.write_subfile(outputDescriptor)
+  const result = await layout.write_subfile(outputDescriptor, opts)
   //const {file, meta} = loadResult
 
 }

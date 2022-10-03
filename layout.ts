@@ -65,14 +65,9 @@
 
 import * as fs from 'node:fs/promises'
 import { FileHandle } from 'node:fs/promises'
-
-// @filename: types.ts
 import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types.js'
-// @filename: common.ts
-import { read_block } from './util.mjs'
-
-// @filename: repoint.ts
-import * as rp from './repoint.mjs'
+import { read_block } from './util.js'
+import * as rp from './repoint.js'
 
 /** Write out a subfile given an output descriptor. */
 export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
@@ -92,13 +87,12 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
   process.stderr.write('Writing blocks... ')
   if(sections.data) {
     if(sections.data.remap) {
-    
     // To support remapping data streams, we introduce a layer of indirection.
-    // Whenever we want to use a 
+    //const srcMap = meta.
     }
     
     if(repoint) {
-      const repointResult = await rp.write_time_shifted_data(repoint.from, repoint.to, repoint.margin, sections.data.file, file, meta)
+      const repointResult: any = await rp.write_time_shifted_data(repoint.from, repoint.to, repoint.margin, sections.data.file, file, meta)
       if(repointResult.status != 'ok')
         return repointResult
       bytesWritten += repointResult.bytesWritten

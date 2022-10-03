@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
-import * as layout from './layout.mjs'
-import { load_subfile } from './subfile.mjs'
-import { read_block, read_section } from './util.mjs'
+import * as layout from './layout.js'
+import { load_subfile } from './subfile.js'
+import { read_block, read_section } from './util.js'
 
 export async function runDump(subfilename, outfilename, opts) {
   const loadResult = await load_subfile(subfilename)

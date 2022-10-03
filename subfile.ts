@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
 import { FileHandle } from 'fs/promises'
-import * as dt from './dt.mjs'
-import { initMetadata, read_header } from './util.mjs'
+import * as dt from './dt.js'
+import { initMetadata, read_header } from './util.js'
 import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types'
 
 /** Load a subfile, gather basic info. */
@@ -53,11 +53,11 @@ export async function load_subfile(filename) {
   meta.margin_offset = meta.udpmap_offset + meta.udpmap_length
   meta.margin_length = meta.num_sources * meta.margin_samples * 2 * 2
 
-  const dtResult = await dt.read_delay_table(file, meta)
-  if(headerResult.status != 'ok')
-    return headerResult
+  const dtResult: any = await dt.read_delay_table(file, meta)
+  if(dtResult.status != 'ok')
+    return dtResult
   const delayTable = dtResult.table
-
+  
   meta.sources = delayTable.map(x => x.rf_input)
 
   return {status: 'ok', file, meta, header}

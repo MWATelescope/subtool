@@ -1,5 +1,6 @@
 {
   "name": "subtool",
+  "type": "module",
   "version": "0.1.0",
   "description": "A command-line tool for working with voltage capture files for the Murchison Widefield Array.",
   "main": "app.mjs",
@@ -24,5 +25,8 @@
   "devDependencies": {
     "@types/node": "^18.7.21",
     "typescript": "^4.8.3"
+  },
+  "dependencies": {
+    "node-ts": "^5.1.2"
   }
 }

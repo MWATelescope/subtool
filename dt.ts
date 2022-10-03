@@ -1,7 +1,7 @@
 /** Delay table loading, parsing, formatting and serialisation. */
 
 import * as fs from 'node:fs/promises'
-import { read_section } from './util.mjs'
+import { read_section } from './util.js'
 import type { Metadata, DelayTableEntry } from './types'
 import { FileHandle } from 'node:fs/promises'
 
@@ -135,6 +135,7 @@ export function serialise_delay_table(table, num_sources, num_fracs) {
   return buf
 }
 
+
 /*
  *    FILE LOADING
  */
@@ -145,8 +146,11 @@ export async function read_delay_table(file: FileHandle, meta: Metadata) {
   if(sectionResult.status != 'ok')
     return sectionResult
 
-  const table = parse_delay_table_binary(sectionResult.buf, meta)
-  return {status: 'ok', table}
+  const parseResult: any = parse_delay_table_binary(sectionResult.buf, meta)
+  if(parseResult.status != 'ok')
+    return parseResult
+
+  return {status: 'ok', table: parseResult.table}
 }
 
 /** Load a delay table from a CSV file. */
