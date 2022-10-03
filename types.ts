@@ -34,6 +34,7 @@ export type Metadata = {
   udpmap_present: boolean;    // (ALL) is a packet map section present in the file?
   udpmap_offset: number;      // (sub) byte offset of packet map
   udpmap_length: number;      // (sub) byte length of packet map
+  sources: number[];          // (ALL) rf sources in order of appearance
 }
 
 export type OutputDescriptor = {
@@ -52,6 +53,7 @@ export type SectionDescriptor = {
   content?: ArrayBuffer;
   file?: FileHandle;
   type: string;
+  remap?: any;
 }
 
 export type SectionDescriptorList = {
@@ -60,4 +62,14 @@ export type SectionDescriptorList = {
   udpmap: SectionDescriptor;
   margin: SectionDescriptor;
   data?: SectionDescriptor;
+}
+
+export type DelayTableEntry = {
+  rf_input: number;
+  ws_delay: number;
+  initial_delay: number;
+  delta_delay: number;
+  delta_delta_delay: number; 
+  num_pointings: number;
+  frac_delay: Int16Array;
 }

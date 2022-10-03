@@ -1,7 +1,48 @@
 // @filename: types.ts
 import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types.js'
+// @filename: util.ts
+import { read_block } from './util.mjs'
 
-/** Write out a time-shifted copy of the data.
+export async function write_time_shifted_data(from, to, margin, infile, outfile, meta) {
+  let bytesWritten = 0;
+  const curDelays = from.map(row => row.ws_delay)
+  const newDelays = to.map(row => row.ws_delay)
+  
+  let blockBuf:     ArrayBuffer = new ArrayBuffer(meta.block_length)
+  let outBlock:     Uint16Array = new Uint16Array(blockBuf)
+  let lastBlock:    Uint16Array | null = null
+  let currentBlock: Uint16Array | null = null
+  let nextBlock:    Uint16Array | null = null 
+  
+  let firstBlockResult = await read_block(1, infile, meta)
+  if(firstBlockResult.status != 'ok')
+    return firstBlockResult
+  
+  nextBlock = new Uint16Array(firstBlockResult.buf)
+  
+  for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
+    lastBlock = currentBlock
+    currentBlock = nextBlock
+  
+    if(blockNum < meta.blocks_per_sub) {
+      let nextBlockResult = await read_block(blockNum+1, infile, meta)
+      if(nextBlockResult.status != 'ok')
+        return nextBlockResult
+      nextBlock = new Uint16Array(nextBlockResult.buf)
+    }
+  
+    time_shift(blockNum, currentBlock, lastBlock, nextBlock, outBlock, curDelays, newDelays, margin, meta)
+
+    await outfile.write(Buffer.from(blockBuf))
+    outBlock.fill(0)
+    bytesWritten += blockBuf.byteLength
+  
+    process.stderr.write(`${blockNum} `)
+  }
+  return {status: 'ok', bytesWritten}
+}
+
+/** Write out a time-shifted copy of a data block.
  * 
  * ARGUMENTS
  * 
@@ -42,7 +83,7 @@ import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor }
  *     range_end   = 2048 - N - M
  * 
  */
- export function timeShift(
+ export function time_shift(
     blockId: number,
     srcBlock: Uint16Array,
     srcPrev: Uint16Array | null,
@@ -51,8 +92,7 @@ import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor }
     current: number[], 
     target: number[], 
     marginData: Uint16Array, 
-    meta: Metadata, 
-    opts) {
+    meta: Metadata) {
 
   const nInputs = current.length
   //const {SAMPLES_PER_LINE, BLOCKS_PER_SUB, MARGIN_SAMPLES} = params
@@ -77,7 +117,7 @@ import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor }
     if(headLength > 0) {
       const dstHead = dstLine.subarray(0, headLength)
       let srcHead: Uint16Array | null = null
-      if(blockId > 0) {
+      if(blockId > 1) {
         const prevLine = srcPrev.subarray(rfSourceId * SAMPLES_PER_LINE, (rfSourceId+1) * SAMPLES_PER_LINE)
         srcHead = prevLine.subarray(-headLength)
       } else {

@@ -1,12 +1,15 @@
 /** Delay table loading, parsing, formatting and serialisation. */
 
 import * as fs from 'node:fs/promises'
+import { read_section } from './util.mjs'
+import type { Metadata, DelayTableEntry } from './types'
+import { FileHandle } from 'node:fs/promises'
 
 /*
  *    PARSING
  */
 
-export function parse_delay_table_binary(buf, opts, meta, byteOffset=0) {
+export function parse_delay_table_binary(buf: ArrayBuffer, meta: Metadata, byteOffset=0) {
   //if(!Number.isInteger(meta.num_sources) || !Number.isInteger(meta.num_frac_delays))
   //  return {status: 'err', reason: `Internal error: Can't parse binary delay table before dimensions have been determined. ${meta.num_sources} ${meta.num_frac_delays}  ` }
 
@@ -21,15 +24,16 @@ export function parse_delay_table_binary(buf, opts, meta, byteOffset=0) {
   return {status: 'ok', table}
 }
 
-export function parse_delay_table_row(buf, meta) {
-  const tile = {}
-  tile.rf_input = buf.getUint16(0, true)
-  tile.ws_delay = buf.getInt16(2, true)
-  tile.initial_delay = buf.getInt32(4, true)
-  tile.delta_delay = buf.getInt32(8, true)
-  tile.delta_delta_delay = buf.getInt32(12, true)
-  tile.num_pointings = buf.getInt16(16, true)
-  tile.frac_delay = new Int16Array(meta.num_frac_delays).map((_,i) => buf.getInt16(18+2*i, true))
+export function parse_delay_table_row(view: DataView, meta: Metadata) {
+  const tile: DelayTableEntry = {
+    rf_input: view.getUint16(0, true),
+    ws_delay: view.getInt16(2, true),
+    initial_delay: view.getInt32(4, true),
+    delta_delay: view.getInt32(8, true),
+    delta_delta_delay: view.getInt32(12, true),
+    num_pointings: view.getInt16(16, true),
+    frac_delay: new Int16Array(meta.num_frac_delays).map((_,i) => view.getInt16(18+2*i, true))
+  }
   return tile
 }
 
@@ -135,16 +139,32 @@ export function serialise_delay_table(table, num_sources, num_fracs) {
  *    FILE LOADING
  */
 
+/** Read the delay table section from an open subfile. */
+export async function read_delay_table(file: FileHandle, meta: Metadata) {
+  const sectionResult = await read_section('dt', file, meta)
+  if(sectionResult.status != 'ok')
+    return sectionResult
+
+  const table = parse_delay_table_binary(sectionResult.buf, meta)
+  return {status: 'ok', table}
+}
+
+/** Load a delay table from a CSV file. */
 export async function load_delay_table_csv(filename, opts, meta) {
   const csv = await fs.readFile(filename, 'utf8')
   const table = parse_delay_table_csv(csv)
   const num_sources = table.length
   const num_frac_delays = table[0].frac_delay.length
+  
 
-  if(Number.isInteger(meta.num_frac_delays) && opts.num_frac_delays != num_frac_delays)
-    return {status: 'err', reason: `Expected number of fractional delays (${opts.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`}
-  if(Number.isInteger(meta.num_sources) && opts.num_sources != num_sources)
-    return {status: 'err', reason: `Expected number of sources (${opts.num_sources}) inconsistent with number found in file (${num_sources}).`}
+  if(Number.isInteger(meta.num_frac_delays) && meta.num_frac_delays != num_frac_delays)
+    return {status: 'err', reason: `Expected number of fractional delays from metadata (${meta.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`}
+  if(Number.isInteger(meta.num_sources) && meta.num_sources != num_sources)
+    return {status: 'err', reason: `Expected number of sources from metadata (${meta.num_sources}) inconsistent with number found in file (${num_sources}).`}
+  if(Number.isInteger(opts.num_frac_delays) && opts.num_frac_delays != num_frac_delays)
+    return {status: 'err', reason: `Expected number of fractional delays from options (${opts.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`}
+  if(Number.isInteger(opts.num_sources) && opts.num_sources != num_sources)
+    return {status: 'err', reason: `Expected number of sources from options (${opts.num_sources}) inconsistent with number found in file (${num_sources}).`}
 
   if(!Number.isInteger(meta.num_sources) || !Number.isInteger(meta.num_frac_delays)) {
     console.warn(`Delay table loaded with ${num_sources} sources and ${num_frac_delays} fractional delays.`)

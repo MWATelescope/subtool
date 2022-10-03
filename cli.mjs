@@ -75,6 +75,9 @@ Write binary contents of a subfile section to a file.
                             data     Entire sample data section.
                             preamble Header + block 0.
   --block=N               Extract the Nth block (sample data starts at N=1).
+  --source=ID             Extract all the samples from a given source ID.
+
+
 `
 
 const schema = {

@@ -26,6 +26,7 @@
  *               buffer    An ArrayBuffer to be copied in directly.
  *               object    Object representation to be serialised.
  *               subfile   Source subfile from which to extract data.
+ *               remap     Array of pairs [A,B], replace A's data with B's, 
  * 
  * Example:
  * 
@@ -63,11 +64,13 @@
  */
 
 import * as fs from 'node:fs/promises'
+import { FileHandle } from 'node:fs/promises'
+
 // @filename: types.ts
 import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types.js'
 // @filename: common.ts
 import { read_block } from './util.mjs'
-import { FileHandle } from 'node:fs/promises'
+
 // @filename: repoint.ts
 import * as rp from './repoint.mjs'
 
@@ -86,47 +89,42 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
   const file = await fs.open(meta.filename, 'w')
   file.write(preamble)
   bytesWritten += preamble.byteLength
-  
+  process.stderr.write('Writing blocks... ')
   if(sections.data) {
-    const curDelays = repoint.from.map(row => row.ws_delay)//(Array(Number(meta.num_sources))).fill(0)
-    const newDelays = repoint.to.map(row => row.ws_delay) //(Array(Number(meta.num_sources))).fill(0)
-    //console.log(curDelays)
-  
-    let blockBuf:     ArrayBuffer = new ArrayBuffer(meta.block_length)
-    let margin:       Uint16Array = repoint.margin
-    let outBlock:     Uint16Array = new Uint16Array(blockBuf)
-    let lastBlock:    Uint16Array | null = null
-    let currentBlock: Uint16Array | null = null
-    let nextBlock:    Uint16Array | null = null 
+    if(sections.data.remap) {
     
-    let firstBlockResult = await read_block(1, sections.data.file, meta)
-    if(firstBlockResult.status != 'ok')
-      return firstBlockResult
-  
-    nextBlock = new Uint16Array(firstBlockResult.buf)
-  
-    for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
-      lastBlock = currentBlock
-      currentBlock = nextBlock
-  
-      if(blockNum < meta.blocks_per_sub) {
-        let nextBlockResult = await read_block(blockNum+1, sections.data.file, meta)
-        if(nextBlockResult.status != 'ok')
-          return nextBlockResult
-        nextBlock = new Uint16Array(nextBlockResult.buf)
-      }
-  
-      rp.timeShift(blockNum, currentBlock, lastBlock, nextBlock, outBlock, curDelays, newDelays, margin, meta, opts)
-      //console.log(blockBuf)
-      //throw "die"
-      await file.write(Buffer.from(blockBuf))
-      outBlock.fill(0)
-      bytesWritten += blockBuf.byteLength
-  
-      console.log(`Wrote block ${blockNum}`)
+    // To support remapping data streams, we introduce a layer of indirection.
+    // Whenever we want to use a 
     }
+    
+    if(repoint) {
+      const repointResult = await rp.write_time_shifted_data(repoint.from, repoint.to, repoint.margin, sections.data.file, file, meta)
+      if(repointResult.status != 'ok')
+        return repointResult
+      bytesWritten += repointResult.bytesWritten
+    } else {  
+     for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
+       const blockResult = await read_block(blockNum+1, sections.data.file, meta)
+       if(blockResult.status != 'ok')
+         return blockResult
+       await file.write(Buffer.from(blockResult.buf))
+       bytesWritten += blockResult.buf.byteLength
+       process.stderr.write(`${blockNum} `)
+      }
+    }
+    process.stderr.write('...done.\n')
   }
 
   file.close()
   return { status: 'ok', bytesWritten }
 }
+
+/** 
+export async function apply_source_remapping(block, srcmap, file, meta) {
+
+  return {status: 'ok'}
+}
+
+
+
+*/
