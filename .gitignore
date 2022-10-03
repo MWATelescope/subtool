@@ -1,9 +1,4 @@
-layout.mjs
-dump.mjs
-util.mjs
-repoint.mjs
-types.mjs
-subfile.mjs
+*.mjs
 .*.swp
 .vscode
 node_modules/

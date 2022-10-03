@@ -3,7 +3,8 @@ import { parseCommandLine } from './cli.mjs'
 import * as dt from './dt.mjs'
 import * as layout from './layout.mjs'
 import * as dump from './dump.mjs'
-import { read_block, read_section, load_subfile } from './util.mjs'
+import { load_subfile } from './subfile.mjs'
+import { read_block, read_section, initMetadata, parse_header } from './util.mjs'
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
 // MODE                NO_CAPTURE           UTC_START           2022-08-02-06:42:46  OBS_OFFSET          80                   NBIT                8
@@ -55,17 +56,22 @@ async function main(args) {
 
 async function runShow(filename, opts) {
   const file = await fs.open(filename, 'r')
-  const meta = initMetadata()
+  const loadResult = await load_subfile(filename)
+  if(loadResult.status != 'ok') {
+    console.error(loadResult.reason)
+    return
+  }
+  const meta = loadResult.meta
+
+  //const meta = initMetadata()
 
   // Read header
   // We always do this, even if we're not printing it, since everything else depends on it (except
   // when only printing the header in binary, but we're not optimising that special case).
   const headerBuf = new ArrayBuffer(4096)
-  let result = await file.read(new Uint8Array(headerBuf), {length: 4096}  )
+  let result = await file.read(new Uint8Array(headerBuf), 0, 4096)
   if(result.bytesRead != 4096) throw `Failed to read header data. Expected to read 4096 bytes, got ${result.bytesRead}`
   const header = parse_header(headerBuf)
-  meta.num_sources = header.NINPUTS
-  meta.num_frac_delays = POINTINGS_PER_SUB
   if(opts.show_header)
     print_header(header, headerBuf, opts)
 
@@ -73,11 +79,11 @@ async function runShow(filename, opts) {
     return {status: 'ok'}
 
   // Read tile metadata
-  const delayTableLength = 20 + 2 * POINTINGS_PER_SUB
+  const delayTableLength = 20 + 2 * 1600
   const delayTablePad = 0 // 4 - delayTableLength % 4
   const delayTableSectionLength = (delayTableLength + delayTablePad) * header.NINPUTS
   const delayTableBuf = new ArrayBuffer(delayTableSectionLength)
-  result = await file.read(new Uint8Array(delayTableBuf), {length: delayTableSectionLength})
+  result = await file.read(new Uint8Array(delayTableBuf), 0, delayTableSectionLength)
   if(result.bytesRead != delayTableSectionLength)
     throw `Failed to read header data. Expected to read ${delayTableSectionLength} bytes, got ${result.bytesRead}`
   const tiles = []
@@ -108,21 +114,21 @@ async function runShow(filename, opts) {
     for(let i=0; i<tiles.length; i++)
       selected_ids.push(i)
   }
-  const blockLength = meta.num_sources * SUB_LINE_SIZE
+  const blockLength = meta.num_sources * meta.sub_line_size
   const block1Buf = new ArrayBuffer(blockLength)
   const block1 = new Int8Array(block1Buf)
-  result = await file.read(new Uint8Array(block1Buf), {length: blockLength, position: 4096 + blockLength})
+  result = await file.read(new Uint8Array(block1Buf), 0, blockLength, 4096 + blockLength)
 
   if(result.bytesRead != blockLength)
     return {status: 'err', reason: `Failed to read sample data. Expected to read ${blockLength} bytes, got ${result.bytesRead}`}
 
   for(let i of selected_ids) {
-    const xs = block1.subarray(i*SUB_LINE_SIZE, (i+1)*SUB_LINE_SIZE)
+    const xs = block1.subarray(i*meta.sub_line_size, (i+1)*meta.sub_line_size)
     let str = tiles[i].rf_input.toString().padStart(4, ' ') + '  '
     for(let j=0; j<opts.num_samples; j++) {
       let [re, im] = [xs[j*2], xs[j*2+1]]
-      if(im >= 0) im = `+${im}`
-      str = str + `${re}${im}i `.padStart(8, ' ')
+      let [reStr, imStr] = [`${re}`, im >= 0 ? `+${im}` : `${im}`]
+      str = str + `${reStr}${imStr}i `.padStart(8, ' ')
     }
     console.log(str)
   }

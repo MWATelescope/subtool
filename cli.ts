@@ -220,7 +220,7 @@ const schema = {
 function parseVal(str, shape) {
   let val = null
   if(str.length == 0) {
-    return {status: invalid}
+    return {status: 'invalid'}
   }
   switch(shape.type) {
   case 'uint':
