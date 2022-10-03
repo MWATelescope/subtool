@@ -1,5 +1,5 @@
 import { FileHandle } from 'fs/promises'
-import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types'
+import type { Metadata } from './types'
 
 /** Create a new metadata object, used for tracking information about files. */
 export const initMetadata = () => ({

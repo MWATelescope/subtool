@@ -1,10 +1,9 @@
 import * as fs from 'node:fs/promises'
 import { parseCommandLine } from './cli.js'
 import * as dt from './dt.js'
-import * as layout from './layout.js'
 import * as dump from './dump.js'
-import { load_subfile } from './subfile.js'
-import { read_block, read_section, initMetadata, parse_header } from './util.js'
+import { load_subfile, write_subfile } from './subfile.js'
+import { read_section, initMetadata, parse_header } from './util.js'
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
 // MODE                NO_CAPTURE           UTC_START           2022-08-02-06:42:46  OBS_OFFSET          80                   NBIT                8
@@ -231,7 +230,7 @@ async function runRepoint(infilename, outfilename, opts) {
       data: { file, type: 'file' },
     },
   }
-  const result = await layout.write_subfile(outputDescriptor, opts)
+  const result = await write_subfile(outputDescriptor, opts)
   //const {file, meta} = loadResult
 
 }
