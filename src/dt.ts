@@ -67,7 +67,7 @@ export function print_delay_table(tiles, delayTableBuf, opts, meta) {
       console.log([
         pad(4, tile.rf_input),
         pad(3, tile.ws_delay),
-        padf(20, tile.initial_delay), // / 1048576000),
+        pad(14, tile.initial_delay), // / 1048576000),
         pad(5, tile.delta_delay),
         tile.delta_delta_delay,
         tile.num_pointings,

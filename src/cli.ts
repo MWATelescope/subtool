@@ -1,6 +1,6 @@
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
-Available commands: info, show, repoint, replace, dt, dump
+Available commands: info, get, set, unset, show, repoint, replace, dt, dump
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -29,6 +29,18 @@ format, or export as CSV or binary.
                             csv      Comma-separated values.
                             bin      Raw binary data.
 
+HEADER FIELD COMMANDS (get, set, unset)
+Get and set values for header fields, or delete them.
+
+      subtool get <KEY> <FILE>
+      subtool set [hdr_opts] <KEY> <VALUE> <FILE>
+      subtool unset [hdr_opts] <KEY> <FILE>
+
+  KEY                     Name of header field.
+  VALUE                   Value for header field.
+  FILE                    Path to input subfile.
+  --force                 Proceed even if key doesn't exist.
+
 REPOINT COMMAND (repoint)
 Apply a delay table to a subfile, or undo existing delays, creating a new
 subfile as output.
@@ -50,6 +62,7 @@ from other sources.
   INPUT_FILE              Path to input subfile.
   OUTPUT_FILE             Path to write output subfile.
   --map=A:B[,C:D...]      Voltages for source A taken from B's data.
+  --map-all=A             Voltages for all sources are taken from A's data.
 
 DELAY TABLE COMMAND (dt)
 Read and write delay table files, select subsets and compare between them.
@@ -87,8 +100,6 @@ Write binary contents of a subfile section to a file.
                             preamble Header + block 0.
   --block=N               Extract the Nth block (sample data starts at N=1).
   --source=ID             Extract all the samples from a given source ID.
-
-
 `
 
 const schema = {
@@ -134,8 +145,8 @@ const schema = {
       show_delay_table: false,
       show_data: false,
       selected_sources: null,
-      num_samples: null,
-      num_frac_delays: null,
+      num_samples: 10,
+      num_frac_delays: 10,
       format_out: "pretty",
       show_block: 1,
     }
@@ -179,6 +190,37 @@ const schema = {
       compare_file: null,
     },
   },
+  get: {
+    args: ["KEY", "FILE"],
+    opts: {
+    },
+    defaults: {
+    },
+  },
+  set: {
+    args: ["KEY", "VALUE", "FILE"],
+    opts: {
+      "--force": {
+        type: "flag",
+        prop: "set_force",
+      },
+    },
+    defaults: {
+      set_force: false,
+    },
+  },
+  unset: {
+    args: ["KEY", "FILE"],
+    opts: {
+      "--force": {
+        type: "flag",
+        prop: "unset_force",
+      },
+    },
+    defaults: {
+      unset_force: false,
+    },
+  },
   repoint: {
     args: ["INPUT_FILE", "OUTPUT_FILE"],
     opts: {
@@ -188,7 +230,7 @@ const schema = {
       },
       "--zero": {
         type: "flag",
-        prop: "zero_delays",
+        prop: "repoint_zero",
       },
       "--force": {
         type: "flag",
@@ -208,9 +250,14 @@ const schema = {
         type: "mapping-list",
         prop: "replace_map",
       },
+      "--map-all": {
+        type: "uint",
+        prop: "replace_map_all",
+      },
     },
     defaults: {
       replace_map: null,
+      replace_map_all: null,
     },
   },
   info: {
@@ -245,7 +292,7 @@ const schema = {
   }
 }
 
-function parseVal(str, shape) {
+function parseVal(str: string, shape) {
   let val = null
   if(str.length == 0) {
     return {status: 'invalid'}
@@ -290,7 +337,7 @@ function parseVal(str, shape) {
   return {status: 'ok', val}
 }
 
-function parseOpt(name, remaining, optSchema, opts) {
+function parseOpt(name: string, remaining: string[], optSchema, opts) {
   if(name.indexOf('=') != -1) {
     const [optName, optArg] = name.split('=')
     name = optName
@@ -318,7 +365,7 @@ function parseOpt(name, remaining, optSchema, opts) {
   return {status: 'ok', remaining: remaining.slice(1)}
 }
 
-function parseOptions(args, optSchema, opts) {
+function parseOptions(args: string[], optSchema, opts) {
   if(args.length == 0) 
     return {status: 'ok', opts}
   
@@ -334,7 +381,7 @@ function parseOptions(args, optSchema, opts) {
   return parseOptions(parseResult.remaining, optSchema, opts)
 }
 
-export function parseCommand(command, args) {
+export function parseCommand(command: string, args: string[]) {
   if(!(command in schema))
     return {status: 'err', reason: `'${command}' is not a valid command. Run without arguments for usage information.`}
 
@@ -352,7 +399,7 @@ export function parseCommand(command, args) {
   return {status: 'ok', command, fixedArgs, opts}
 }
 
-export function parseCommandLine(argList) {
+export function parseCommandLine(argList: string[]) {
   if(argList.length == 0) {
     console.log(USAGE)
     return {status: 'ok', command: null}

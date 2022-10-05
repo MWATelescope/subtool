@@ -66,14 +66,15 @@
 import * as fs from 'node:fs/promises'
 import { FileHandle } from 'fs/promises'
 import * as dt from './dt.js'
-import { initMetadata, read_header, read_block } from './util.js'
+import { read_header } from './header.js'
+import { initMetadata, read_block } from './util.js'
 import * as rp from './repoint.js'
 import type { Metadata, OutputDescriptor, SourceMap } from './types'
 
 /** Load a subfile, gather basic info. */
-export async function load_subfile(filename: string) {
+export async function load_subfile(filename: string, mode='r') {
   const meta: Metadata = initMetadata()
-  const file: FileHandle = await fs.open(filename, 'r')
+  const file: FileHandle = await fs.open(filename, mode)
 
   meta.filename = filename
   meta.filetype = 'subfile'

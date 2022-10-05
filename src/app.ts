@@ -3,42 +3,17 @@ import { parseCommandLine } from './cli.js'
 import * as dt from './dt.js'
 import * as dump from './dump.js'
 import { load_subfile, write_subfile } from './subfile.js'
-import { read_section, initMetadata, parse_header, read_block } from './util.js'
+import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
+import { read_section, initMetadata, read_block, write_section } from './util.js'
 import type { Metadata, OutputDescriptor, SourceMap } from './types'
 import { FileHandle } from 'node:fs/promises'
 
-// HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
-// MODE                NO_CAPTURE           UTC_START           2022-08-02-06:42:46  OBS_OFFSET          80                   NBIT                8
-// NPOL                2                    NTIMESAMPLES        64000                NINPUTS             272                  NINPUTS_XGPU        288
-// APPLY_PATH_WEIGHTS  0                    APPLY_PATH_DELAYS   0                    INT_TIME_MSEC       2000                 FSCRUNCH_FACTOR     200
-// APPLY_VIS_WEIGHTS   0                    TRANSFER_SIZE       5605376000           PROJ_ID             C001                 EXPOSURE_SECS       8
-// COARSE_CHANNEL      129                  CORR_COARSE_CHANNEL 24                   SECS_PER_SUBOBS     8                    UNIXTIME            1659422566
-// UNIXTIME_MSEC       0                    FINE_CHAN_WIDTH_HZ  40000                NFINE_CHAN          32                   BANDWIDTH_HZ        1280000
-// SAMPLE_RATE         1280000              MC_IP               0.0.0.0              MC_PORT             0                    MC_SRC_IP           0.0.0.0
 
-function print_header(header, headerBuf, opts) {
-  if(opts.format_out == 'pretty') {
-    const hdr = Object.entries(header).map(([k,v]) => [k.padEnd(19, ' '), v.toString().padEnd(16, ' ')])
-    for(let i=0; i<hdr.length; i+=4) {
-      const rowItems = hdr.slice(i, i+4)
-      const row = rowItems.reduce((acc,[k,v]) => `${acc}${k} ${v}`, '')
-      console.log(row)
-    }
-  } else if(opts.format_out == 'csv') {
-    Object.entries(header).forEach(([k,v]) => console.log(`${k},${v}`))
-  } else if(opts.format_out == 'bin') {
-    process.stdout.write(Buffer.from(headerBuf))
-  } else {
-    throw `Unsupported output format for header: ${opts.format_out}`
-  }
-}
-
-async function main(args) {
+async function main(args: string[]) {
   const parseResult = parseCommandLine(args)
-  if(parseResult.status != 'ok') {
-    console.error(parseResult.reason)
-    return
-  }
+  if(parseResult.status != 'ok')
+    return parseResult
+  
   switch(parseResult.command) {
   case 'show':
     return runShow(parseResult.fixedArgs[0], parseResult.opts)
@@ -52,6 +27,12 @@ async function main(args) {
     return runRepoint(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case 'replace':
     return runReplace(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
+  case 'get':
+    return runGet(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
+  case 'set':
+    return runSet(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.fixedArgs[2], parseResult.opts)
+  case 'unset':
+    return runUnset(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case null:
     return {status: 'ok'}
   default:
@@ -61,16 +42,79 @@ async function main(args) {
   return {status: 'ok'}
 }
 
-async function runShow(filename, opts) {
+async function runGet(key: string, filename: string, opts) {
+  const loadResult = await load_subfile(filename)
+  if(loadResult.status != 'ok')
+    return loadResult
+  const {meta, file} = loadResult
+  const headerResult: any = await read_header(file, meta)
+  if(headerResult.status != 'ok')
+    return headerResult
+  const header = headerResult.header
+  if(key in header)
+    console.log(header[key])
+  else
+    console.log(`No such key: ${key}.`)
+
+  await file.close()
+  return {status: 'ok'}
+}
+
+async function runSet(key: string, value: string, filename: string, opts) {
+  const loadResult = await load_subfile(filename, 'r+')
+  if(loadResult.status != 'ok')
+    return loadResult
+  const {meta, file} = loadResult
+  const headerResult: any = await read_header(file, meta)
+  if(headerResult.status != 'ok')
+    return headerResult
+
+  const header = headerResult.header
+  const setResult = set_header_value(key, value, header, opts.set_force)
+  if(setResult.status != 'ok')
+    return setResult
+
+  const headerBuf = serialise_header(header, meta)
+  const writeResult = await write_section('header', headerBuf, file, meta)
+  if(writeResult.status != 'ok')
+    return writeResult
+
+  await file.close()
+  return {status: 'ok'}
+}
+
+async function runUnset(key: string, filename: string, opts) {
+  const loadResult = await load_subfile(filename, 'r+')
+  if(loadResult.status != 'ok')
+    return loadResult
+  const {meta, file} = loadResult
+  const headerResult: any = await read_header(file, meta)
+  if(headerResult.status != 'ok')
+    return headerResult
+
+  const header = headerResult.header
+  if(!(key in header || opts.unset_force)) {
+    await file.close()
+    return {status: 'err', reason: `No such key ${key}.`}
+  } 
+
+  delete header[key]
+
+  const headerBuf = serialise_header(header, meta)
+  const writeResult = await write_section('header', headerBuf, file, meta)
+  if(writeResult.status != 'ok')
+    return writeResult
+
+  await file.close()
+  return {status: 'ok'}
+}
+
+async function runShow(filename: string, opts) {
   const file: FileHandle = await fs.open(filename, 'r')
   const loadResult = await load_subfile(filename)
-  if(loadResult.status != 'ok') {
-    console.error(loadResult.reason)
-    return
-  }
+  if(loadResult.status != 'ok')
+    return loadResult
   const meta = loadResult.meta
-
-  //const meta = initMetadata()
 
   // Read header
   // We always do this, even if we're not printing it, since everything else depends on it (except
@@ -79,13 +123,16 @@ async function runShow(filename, opts) {
   let result = await file.read(new Uint8Array(headerBuf), 0, 4096)
   if(result.bytesRead != 4096) throw `Failed to read header data. Expected to read 4096 bytes, got ${result.bytesRead}`
   const header = parse_header(headerBuf)
-  if(opts.show_header)
+  if(opts.show_header) {
+    console.log('Header section:')
     print_header(header, headerBuf, opts)
+  }
 
   if(!(opts.show_delay_table || opts.show_data))
     return {status: 'ok'}
 
   // Read tile metadata
+  console.log('')
   const delayTableLength = 20 + 2 * 1600
   const delayTablePad = 0 // 4 - delayTableLength % 4
   const delayTableSectionLength = (delayTableLength + delayTablePad) * header.NINPUTS
@@ -101,11 +148,12 @@ async function runShow(filename, opts) {
   }
   if(opts.show_delay_table)
     dt.print_delay_table(tiles, delayTableBuf, opts, meta)
+  
 
   // Read voltages
   if(!opts.show_data) {
     await file.close()
-    return
+    return {status: 'ok'}
   }
   const selected_ids = []
   if(opts.selected_sources != null) {
@@ -125,12 +173,12 @@ async function runShow(filename, opts) {
   const dataBlockResult: any = await read_block(opts.show_block, file, meta)
   if(dataBlockResult.status != 'ok')
     return dataBlockResult
-  
+  console.log('\nVoltage data:')
   const dataBlock = new Int8Array(dataBlockResult.buf)
   const nSamples = Math.min(meta.samples_per_line, opts.num_samples)
   for(let i of selected_ids) {
     const xs = dataBlock.subarray(i*meta.sub_line_size, (i+1)*meta.sub_line_size)
-    let str = 
+    //let str = 
     process.stdout.write(`${tiles[i].rf_input.toString().padStart(4, ' ')} `)
     for(let j=0; j<nSamples; j++) {
       let [re, im] = [xs[j*2], xs[j*2+1]]
@@ -146,7 +194,7 @@ async function runShow(filename, opts) {
   return {status: 'ok'}
 }
 
-async function runDt(filename, opts) {
+async function runDt(filename: string, opts) {
   const meta = initMetadata()
   meta.filename = filename
   meta.num_sources = opts.num_sources_in
@@ -271,8 +319,12 @@ async function runReplace(infilename: string, outfilename: string, opts) {
 
   const origMap: SourceMap = Object.fromEntries(meta.sources.map((x, i) => [x, i]))
   const remap: SourceMap = Object.fromEntries(meta.sources.map((x, i) => [x, i]))
-  for(let [k,v] of opts.replace_map)
-    remap[k] = origMap[v]
+  if(opts.replace_map_all != null) {
+    for(let [k,v] of Object.entries(remap))
+      remap[k] = origMap[opts.replace_map_all]
+  } else
+    for(let [k,v] of opts.replace_map)
+      remap[k] = origMap[v]
   
   
   const outputMeta = { ...meta, filename: outfilename}
@@ -301,4 +353,4 @@ const result: any = await main(process.argv.slice(2)) /*.catch(e => {
 })*/
 
 if(result.status != 'ok')
-  console.log(`\nsubtool failed with status '${result.status}'. Reason: ${result.reason}`)
+  console.log(`${result.reason}`)

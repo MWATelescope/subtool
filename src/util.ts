@@ -76,16 +76,6 @@ export async function read_block(num: number, file: FileHandle, meta: Metadata) 
   return {status: 'ok', buf}
 }
 
-/** Read the header section from a subfile. */
-export async function read_header(file, meta) {
-  const sectionResult = await read_section('header', file, meta)
-  if(sectionResult.status != 'ok')
-    return sectionResult
-
-  const header = parse_header(sectionResult.buf)
-  return {status: 'ok', header}
-}
-
 /** Read the margin section from a subfile. */
 export async function read_margin(file, meta) {
   const sectionResult = await read_section('margin', file, meta)
@@ -95,23 +85,17 @@ export async function read_margin(file, meta) {
   return {status: 'ok', buf: sectionResult.buf}
 }
 
+export async function write_section(name: string, buffer: ArrayBuffer, file: FileHandle, meta: Metadata) {
+  const isPresent = meta[`${name}_present`]
+  const length = meta[`${name}_length`]
+  const position = meta[`${name}_offset`]
 
-/** Parse a header fragment, returning a list of key,value pairs. */
-export function parse_header(buf) {
-  const INTEGER_FIELDS = [
-    'HDR_SIZE', 'POPULATED', 'OBS_ID', 'SUBOBS_ID', 'OBS_OFFSET', 'NBIT', 'NPOL', 'NTIMESAMPLES', 'NINPUTS', 
-    'NINPUTS_XGPU', 'APPLY_PATH_WEIGHTS', 'APPLY_PATH_DELAYS', 'INT_TIME_MSEC', 'FSCRUNCH_FACTOR', 'APPLY_VIS_WEIGHTS', 
-    'TRANSFER_SIZE', 'EXPOSURE_SECS', 'COARSE_CHANNEL', 'CORR_COARSE_CHANNEL', 'SECS_PER_SUBOBS', 'UNIXTIME',
-    'UNIXTIME_MSEC', 'FINE_CHAN_WIDTH_HZ', 'NFINE_CHAN', 'BANDWIDTH_HZ', 'SAMPLE_RATE', 'MC_PORT']
-  const text = new TextDecoder().decode(buf).replace(/\0*/g,'').trim()
-  const fields = text.split('\n').map(x => x.split(' ')).map(([k,v]) => {
-    if(k in INTEGER_FIELDS)
-      return [k, Number.parseInt(v)]
-    else if(k == 'UTC_START')
-      return [k, v.replace(/[-:]/g, '')]
-    else
-      return [k, v]
-  })
-  return Object.fromEntries(fields)
+  if(!isPresent)
+    return {status: 'err', reason: `Cannot read section '${name}' when not indicated in metadata.`}
+
+  const result = await file.write(new Uint8Array(buffer), 0, length, position)
+  if(result.bytesWritten != length)
+    return {status: 'err', reason: `Failed to read section '${name}'. Expected to write ${length} bytes, got ${result.bytesWritten}`}
+
+  return {status: 'ok'}
 }
-
