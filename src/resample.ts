@@ -84,7 +84,7 @@ export async function resample(fns: TransformerSet, region: number, infile: File
                           ...nextLine.subarray(0, (region - (lineSz - sampleIdx - 1))*2)])
      
       const newSample = fn(prevSamples, sample, nextSamples, sampleTime)
-      dstLine.set(newSample, sampleIdx*2)
+      dstLine.set(newSample.map(Math.round), sampleIdx*2)
     }
   }
 }
