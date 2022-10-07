@@ -1,6 +1,4 @@
-// @filename: types.ts
 import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types'
-// @filename: util.ts
 import { read_block } from './util.js'
 
 export async function write_time_shifted_data(from, to, margin, infile, outfile, meta) {

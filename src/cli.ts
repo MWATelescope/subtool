@@ -1,6 +1,7 @@
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
-Available commands: info, get, set, unset, show, repoint, replace, dt, dump
+Available commands:
+  info, get, set, unset, show, dt, dump, repoint, replace, resample
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -100,6 +101,23 @@ Write binary contents of a subfile section to a file.
                             preamble Header + block 0.
   --block=N               Extract the Nth block (sample data starts at N=1).
   --source=ID             Extract all the samples from a given source ID.
+
+RESAMPLE COMMAND (replace)
+Write a new subfile, resampling voltage data from specified sources with
+varying phase delays.
+
+      subtool resample [resample_opts] <INPUT_FILE> <OUTPUT_FILE>
+
+  INPUT_FILE              Path to input subfile.
+  OUTPUT_FILE             Path to write output subfile.
+  --phase=A[,B...]        Phase specifiers (see note below).
+
+Phase specifiers describe the phase shift for a specified source. The phase
+shift has a start and end value in millisamples:
+
+    <source>:<start>:<end>
+
+Voltages are resampled with linear interpolation.
 `
 
 const schema = {
@@ -241,6 +259,18 @@ const schema = {
       delay_table_filename: null,
       zero_delays: false,
       force_delays: false,
+    },
+  },
+  resample: {
+    args: ["INPUT_FILE", "OUTPUT_FILE"],
+    opts: {
+      "--phase": {
+        type: "phasespec-list",
+        prop: "resample_phase",
+      },
+    },
+    defaults: {
+      resample_phase: null,
     },
   },
   replace: {

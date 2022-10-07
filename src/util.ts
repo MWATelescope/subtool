@@ -1,42 +1,43 @@
 import { FileHandle } from 'fs/promises'
-import type { Metadata } from './types'
+import type { Metadata, Z } from './types'
 
 /** Create a new metadata object, used for tracking information about files. */
 export const initMetadata = () => ({
-  filename: null,                  // (ALL) path to file
-  filetype: null,                  // (ALL) "subfile" or "delay-table"
-  observation_id: null,            // (sub) observation id
-  subobservation_id: null,         // (sub) subobservation id
-  num_sources: null,               // (ALL) number of sources that appear in the file
-  num_frac_delays: null,           // (ALL) number of fractional delays used in the delay table
-  sample_rate: null,               // (sub) sample rate for subobservation
-  secs_per_subobs: null,           // (sub) length of subobservation in seconds
-  samples_per_line: null,          // (sub) samples per line in each data block
-  samples_per_packet: null,        // (sub) number of samples in a udp packet
-  udp_payload_length: null,        // (sub) byte length of a udp packet payload
-  udp_per_rf_per_sub: null,        // (sub) number of packets per source in a subobservation
-  sub_line_size: null,             // (sub) byte length of line in data block
-  blocks_per_sub: null,            // (sub) number of blocks in the data section
-  fft_per_block: null,             // (sub) number of fft sub-blocks per block
-  block_length: null,              // (sub) byte length of 1 block
-  margin_packets: null,            // (sub) number of margin packets per source at each end
-  margin_samples: null,            // (sub) number of margin samples per source at each end
-  dt_present: null,                // (ALL) is a delay table section present in the file?
-  dt_offset: null,                 // (ALL) byte offset of delay table
-  dt_length: null,                 // (ALL) byte length of delay table
-  header_present: null,            // (ALL) is a header section present in the file?
-  header_offset: null,             // (sub) byte offset of header
-  header_length: null,             // (sub) byte length of header
-  data_present: null,              // (ALL) is a data section present in the file?
-  data_offset: null,               // (sub) byte offset of data section
-  data_length: null,               // (sub) byte length of data section
-  margin_present: null,            // (ALL) is a margin section present in the file?
-  margin_offset: null,             // (sub) byte offset of margin section
-  margin_length: null,             // (sub) byte length of margin section
-  udpmap_present: null,            // (ALL) is a packet map section present in the file?
-  udpmap_offset: null,             // (sub) byte offset of packet map
-  udpmap_length: null,             // (sub) byte length of packet map
-  sources: null,                   // (ALL) rf sources in order of appearance
+  filename: null,          
+  filetype: null,          
+  observation_id: null,    
+  subobservation_id: null, 
+  num_sources: null,       
+  num_frac_delays: null,   
+  sample_rate: null,       
+  secs_per_subobs: null,   
+  samples_per_line: null,  
+  samples_per_packet: null,
+  udp_payload_length: null,
+  udp_per_rf_per_sub: null,
+  sub_line_size: null,     
+  blocks_per_sub: null,    
+  blocks_per_sec: null,
+  fft_per_block: null,     
+  block_length: null,      
+  margin_packets: null,    
+  margin_samples: null,    
+  dt_present: null,        
+  dt_offset: null,         
+  dt_length: null,         
+  header_present: null,    
+  header_offset: null,     
+  header_length: null,     
+  data_present: null,      
+  data_offset: null,       
+  data_length: null,       
+  margin_present: null,    
+  margin_offset: null,     
+  margin_length: null,     
+  udpmap_present: null,    
+  udpmap_offset: null,     
+  udpmap_length: null,     
+  sources: null,           
 })
 
 /** Read section data from a subfile into an ArrayBuffer. */
@@ -98,4 +99,32 @@ export async function write_section(name: string, buffer: ArrayBuffer, file: Fil
     return {status: 'err', reason: `Failed to read section '${name}'. Expected to write ${length} bytes, got ${result.bytesWritten}`}
 
   return {status: 'ok'}
+}
+
+/** Get the results for a list of action Promises. */
+export async function await_all(tasks) {
+  const values = []
+  for(let task of tasks) {
+    const result = await task
+    if(result.status != 'ok') return result
+    values.push(result.value)
+  }
+  return {status: 'ok', value: values}
+}
+
+function unpack(x: number): Z {
+  return [x & 255, (x >> 8) & 255]
+}
+
+function group(xs) {
+  let buf = []
+  for(let i=0; i<xs.length; i+=2) {
+    buf.push([xs[i],xs[i+1]])
+  }
+  return buf
+}
+
+function formatZ([r, i]: Z) {
+  return i >= 0 ? `${r}+${i}i`
+                : `${r}${i}i`
 }

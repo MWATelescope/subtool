@@ -7,6 +7,7 @@ import { print_header, parse_header, read_header, serialise_header, set_header_v
 import { read_section, initMetadata, read_block, write_section } from './util.js'
 import type { Metadata, OutputDescriptor, SourceMap } from './types'
 import { FileHandle } from 'node:fs/promises'
+import {make_phase_gradient_resampler} from './resample.js'
 
 
 async function main(args: string[]) {
@@ -33,6 +34,8 @@ async function main(args: string[]) {
     return runSet(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.fixedArgs[2], parseResult.opts)
   case 'unset':
     return runUnset(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
+  case 'resample':
+    return runResample(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case null:
     return {status: 'ok'}
   default:
@@ -342,6 +345,49 @@ async function runReplace(infilename: string, outfilename: string, opts) {
   const writeResult = await write_subfile(outputDescriptor, opts)
   if(writeResult.status != 'ok')
     return writeResult
+
+  return {status: 'ok'}
+}
+
+async function runResample(infilename: string, outfilename: string, opts) {
+  const loadResult = await load_subfile(infilename)
+  if(loadResult.status != 'ok') {
+    console.error(loadResult.reason)
+    return
+  }
+  const {file, meta} = loadResult
+
+  const headerResult = await read_section('header', file, meta)
+  const dtResult =     await read_section('dt', file, meta)
+  const udpmapResult = await read_section('udpmap', file, meta)
+  const marginResult = await read_section('margin', file, meta)
+  if(headerResult.status != 'ok') return headerResult
+  if(dtResult.status != 'ok') return dtResult
+  if(udpmapResult.status != 'ok') return udpmapResult
+  if(marginResult.status != 'ok') return marginResult
+
+  const outputMeta = { ...meta, filename: outfilename}
+  const outputDescriptor = {
+    meta: outputMeta,
+    resample: {
+      fns: {
+        32: make_phase_gradient_resampler(1/8),
+        34: make_phase_gradient_resampler(1/8),
+      },
+      region: 1,
+    },
+    sections: {
+      header: { content: headerResult.buf, type: 'buffer' },
+      dt: { content: dtResult.buf, type: 'buffer' },
+      udpmap: { content: udpmapResult.buf, type: 'buffer' },
+      margin: { content: marginResult.buf, type: 'buffer' },
+      data: { file, type: 'file' },
+    },
+  }
+  const writeResult = await write_subfile(outputDescriptor, opts)
+  if(writeResult.status != 'ok')
+    return writeResult
+  console.warn(`Wrote ${writeResult.bytesWritten} bytes to ${outfilename}.`)
 
   return {status: 'ok'}
 }

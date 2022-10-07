@@ -15,6 +15,7 @@ export type Metadata = {
   udp_per_rf_per_sub: number; // (sub) number of packets per source in a subobservation
   sub_line_size: number;      // (sub) byte length of line in data block
   blocks_per_sub: number;     // (sub) number of blocks in the data section
+  blocks_per_sec: number;     // (sub) number of blocks per second
   fft_per_block: number;      // (sub) number of fft sub-blocks per block
   block_length: number;       // (sub) byte length of 1 block
   margin_packets: number;     // (sub) number of margin packets per source at each end
@@ -41,7 +42,13 @@ export type OutputDescriptor = {
   meta: Metadata;
   repoint?: RepointDescriptor;
   remap?: SourceMap;
+  resample?: ResampleDescriptor;
   sections: SectionDescriptorList;
+}
+
+export type ResampleDescriptor = {
+  fns: TransformerSet;
+  region: number;
 }
 
 export type RepointDescriptor = {
@@ -77,3 +84,10 @@ export type DelayTableEntry = {
 export type SourceMap = {
   [k: number]: number;
 }
+
+/** A complex number. */
+export type Z = [number, number];
+
+/** Resampling transform function. */
+export type TransformFn = (prev: Int8Array, cur: Z, next: Int8Array, time: number) => Z
+export type TransformerSet =  { [index: number]: TransformFn }

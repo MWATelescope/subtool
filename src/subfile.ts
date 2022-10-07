@@ -69,6 +69,7 @@ import * as dt from './dt.js'
 import { read_header } from './header.js'
 import { initMetadata, read_block } from './util.js'
 import * as rp from './repoint.js'
+import * as rs from './resample.js'
 import type { Metadata, OutputDescriptor, SourceMap } from './types'
 
 /** Load a subfile, gather basic info. */
@@ -94,20 +95,20 @@ export async function load_subfile(filename: string, mode='r') {
     return headerResult
   const header = headerResult.header
 
-
   meta.num_sources = header.NINPUTS
   meta.sample_rate = header.SAMPLE_RATE
   meta.secs_per_subobs = header.SECS_PER_SUBOBS
   meta.observation_id = header.OBS_ID
   meta.subobservation_id = header.SUBOBS_ID
-  
-  meta.samples_per_line = header.NTIMESAMPLES 
+  meta.samples_per_line = header.NTIMESAMPLES
+  meta.margin_samples = header.MARGIN_SAMPLES ?? meta.margin_packets * meta.samples_per_packet
+
   meta.blocks_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_line
+  meta.blocks_per_sec = meta.blocks_per_sub / meta.secs_per_subobs
   meta.sub_line_size = meta.samples_per_line * 2
   meta.num_frac_delays = meta.blocks_per_sub * meta.fft_per_block
   meta.udp_per_rf_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_packet
   meta.udp_payload_length = meta.samples_per_packet * 2
-  meta.margin_samples = meta.margin_packets * meta.samples_per_packet
   meta.dt_length = meta.num_sources * (20 + meta.num_frac_delays*2)
   meta.block_length = meta.sub_line_size * meta.num_sources
   meta.data_present = true
@@ -134,7 +135,7 @@ export async function load_subfile(filename: string, mode='r') {
 
 /** Write out a subfile given an output descriptor. */
 export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
-  const { meta, repoint, remap, sections } = output_descriptor
+  const { meta, repoint, remap, resample, sections } = output_descriptor
   let bytesWritten: number = 0
   // Create a buffer to hold the preamble: header + block 0
   // This way we can use the exact offsets as given in the metadata.
@@ -171,6 +172,11 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
       if(repointResult.status != 'ok')
         return repointResult
       bytesWritten += repointResult.bytesWritten
+    } else if(resample) {
+      const resampleResult: any = await rs.resample(resample.fns, resample.region, sections.data.file, file, meta)
+      if(resampleResult.status != 'ok')
+        return resampleResult
+      bytesWritten += resampleResult.value
     } else {  
      for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
        const blockResult = await read_block(blockNum, sections.data.file, meta)
