@@ -1,5 +1,5 @@
 import { FileHandle } from 'fs/promises'
-import type { Metadata, Z } from './types'
+import type { Metadata, Result, Z } from './types'
 
 /** Create a new metadata object, used for tracking information about files. */
 export const initMetadata = () => ({
@@ -112,11 +112,21 @@ export async function await_all(tasks) {
   return {status: 'ok', value: values}
 }
 
-function unpack(x: number): Z {
+export function all<T>(results: Result<T>[]): Result<T[]> {
+  const vals = []
+  for(let result of results) {
+    if(result.status != 'ok') 
+      return fail(result.reason)
+    vals.push(result.value)
+  }
+  return ok(vals)
+}
+
+export function unpack(x: number): Z {
   return [x & 255, (x >> 8) & 255]
 }
 
-function group(xs) {
+export function group(xs) {
   let buf = []
   for(let i=0; i<xs.length; i+=2) {
     buf.push([xs[i],xs[i+1]])
@@ -124,7 +134,15 @@ function group(xs) {
   return buf
 }
 
-function formatZ([r, i]: Z) {
+export function formatZ([r, i]: Z) {
   return i >= 0 ? `${r}+${i}i`
                 : `${r}${i}i`
+}
+
+export function fail<T>(reason: string): Result<T> {
+  return {status: 'err', reason, value: null}
+}
+
+export function ok<T>(value: T = null): Result<T> {
+  return {status: 'ok', value}
 }

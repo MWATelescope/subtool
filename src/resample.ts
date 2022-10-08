@@ -1,8 +1,8 @@
-import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor, TransformFn, Z, TransformerSet } from './types'
+import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor, TransformFn, Z, TransformerSet, Result } from './types'
 import { read_block, read_block_or_null } from './reader.js'
 import {FileHandle} from 'fs/promises';
 import {cache_create} from './cache.js';
-import {await_all, read_margin} from './util.js';
+import {await_all, fail, ok, read_margin} from './util.js';
 
 
 export async function resample(fns: TransformerSet, region: number, infile: FileHandle, outfile: FileHandle, meta: Metadata) {
@@ -32,7 +32,7 @@ export async function resample(fns: TransformerSet, region: number, infile: File
   
     process.stderr.write(`${blockNum} `)
   }
-  console.warn(`Cache stats: hits=${cache.stats.hits} misses=${cache.stats.misses} inserts=${cache.stats.inserts} flushes=${cache.stats.flushes} deletes=${cache.stats.deletes} retained=${cache.stats.retained} released=${cache.stats.released}`)
+  //console.warn(`Cache stats: hits=${cache.stats.hits} misses=${cache.stats.misses} inserts=${cache.stats.inserts} flushes=${cache.stats.flushes} deletes=${cache.stats.deletes} retained=${cache.stats.retained} released=${cache.stats.released}`)
   return {status: 'ok', value: bytesWritten}
 }
 
@@ -82,25 +82,56 @@ export async function resample(fns: TransformerSet, region: number, infile: File
         : sampleIdx == lineSz - 1      ? nextLine.subarray(0, region*2)
         : new Int8Array([ ...curLine.subarray((sampleIdx + 1)*2),
                           ...nextLine.subarray(0, (region - (lineSz - sampleIdx - 1))*2)])
-     
+      
       const newSample = fn(prevSamples, sample, nextSamples, sampleTime)
       dstLine.set(newSample.map(Math.round), sampleIdx*2)
     }
   }
 }
+// TODO: also resample margin values!
+// TODO: should these be aware of existing ws delays?
+// TODO: left/right shift direction can change due to initial value with the opposite sign!
+export function make_phase_gradient_resampler(samples_per_second: number, initial: number): TransformFn {
+  return function phase_shift(prev: Int8Array, cur: Z, next: Int8Array, time: number): Z {
+    const amount = initial + samples_per_second * time
+    const ws = Math.trunc(amount)
+    const frac = Math.abs(amount - ws)
+    let [s1, s2] = [null, null]
+    if(amount > 0) {
+      s1 = ws == 0 ? cur : next.slice((ws-1)*2, (ws-1)*2 + 2)
+      s2 = next.slice(ws*2, ws*2 + 2)
+    } else if(amount < 0) {
+      s1 = ws == 0 ? cur : prev.slice(prev.length + ws*2, prev.length + (ws+1)*2)
+      s2 = prev.slice(prev.length + (ws-1)*2, prev.length + (ws)*2)
+      //if(ws != 0 && time > 0) {
+      //console.log(ws, frac, s1,s2)
+      //throw 'asddf'
+      //}
+    } else {
+      s1 = s2 = cur
+    }
+    const dir = [s2[0] - s1[0], s2[1] - s1[1]]
+    //if(time == 3) {
+    //  console.log(amount, ws, frac, s1, s2, dir)
+    //  throw 'asdf'
+    //}
+    return [s1[0] + dir[0]*frac, s1[1] + dir[1]*frac]
+  }
+}
 
-export function make_phase_gradient_resampler(samples_per_second: number): TransformFn {
-  function phase_shift_left(prev: Int8Array, cur: Z, next: Int8Array, time: number): Z {
-    const amount = Math.abs(samples_per_second) * time
-    const dir = [prev[0] - cur[0], prev[1] - cur[1]]
-    return [cur[0] + dir[0]*amount, cur[1] + dir[1]*amount]
-  }
-  function phase_shift_right(prev: Int8Array, cur: Z, next: Int8Array, time: number): Z {
-    const amount = samples_per_second * time
-    const dir = [next[0] - cur[0], next[1] - cur[1]]
-    return [cur[0] + dir[0]*amount, cur[1] + dir[1]*amount]
-  }
-  return samples_per_second >= 0 ? phase_shift_right : phase_shift_left
+function make_scale_resampler(scale: number): TransformFn {
+  return (prev: Int8Array, cur: Z, next: Int8Array, time: number) => [cur[0]*scale, cur[1]*scale]
+}
+
+const TRANSFORM_BUILDERS: {[k: string] : (...args) => TransformFn} = {
+  scale: make_scale_resampler,
+  linear: make_phase_gradient_resampler,
+}
+
+export function make_resampler_transform(name: string, args: number[]): Result<TransformFn> {
+  if(!(name in TRANSFORM_BUILDERS))
+    return fail(`Invalid transform function: ${name}`)
+  return ok(TRANSFORM_BUILDERS[name](...args))
 }
 
 /** Get the head or tail margin samples for a given source ID. */

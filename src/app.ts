@@ -1,17 +1,17 @@
 import * as fs from 'node:fs/promises'
-import { parseCommandLine } from './cli.js'
+import { parse_command_line } from './cli.js'
 import * as dt from './dt.js'
 import * as dump from './dump.js'
 import { load_subfile, write_subfile } from './subfile.js'
 import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
-import { read_section, initMetadata, read_block, write_section } from './util.js'
-import type { Metadata, OutputDescriptor, SourceMap } from './types'
+import { read_section, initMetadata, read_block, write_section, ok, fail } from './util.js'
+import type { Metadata, OutputDescriptor, SourceMap, TransformerSet, TransformSpec } from './types'
 import { FileHandle } from 'node:fs/promises'
-import {make_phase_gradient_resampler} from './resample.js'
+import {make_phase_gradient_resampler, make_resampler_transform} from './resample.js'
 
 
 async function main(args: string[]) {
-  const parseResult = parseCommandLine(args)
+  const parseResult = parse_command_line(args)
   if(parseResult.status != 'ok')
     return parseResult
   
@@ -37,12 +37,12 @@ async function main(args: string[]) {
   case 'resample':
     return runResample(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case null:
-    return {status: 'ok'}
+    return ok()
   default:
     console.error(`${parseResult.command} is not implemented.`)
     break
   }
-  return {status: 'ok'}
+  return ok()
 }
 
 async function runGet(key: string, filename: string, opts) {
@@ -60,7 +60,7 @@ async function runGet(key: string, filename: string, opts) {
     console.log(`No such key: ${key}.`)
 
   await file.close()
-  return {status: 'ok'}
+  return ok()
 }
 
 async function runSet(key: string, value: string, filename: string, opts) {
@@ -83,7 +83,7 @@ async function runSet(key: string, value: string, filename: string, opts) {
     return writeResult
 
   await file.close()
-  return {status: 'ok'}
+  return ok()
 }
 
 async function runUnset(key: string, filename: string, opts) {
@@ -98,7 +98,7 @@ async function runUnset(key: string, filename: string, opts) {
   const header = headerResult.header
   if(!(key in header || opts.unset_force)) {
     await file.close()
-    return {status: 'err', reason: `No such key ${key}.`}
+    return fail(`No such key ${key}.`)
   } 
 
   delete header[key]
@@ -366,15 +366,30 @@ async function runResample(infilename: string, outfilename: string, opts) {
   if(udpmapResult.status != 'ok') return udpmapResult
   if(marginResult.status != 'ok') return marginResult
 
+  // Get delay table for looking up source indices
+  const dtParseResult = dt.parse_delay_table_binary(dtResult.buf, meta, 0)
+  if(dtParseResult.status != 'ok') return dtParseResult
+  const delayTable = dtParseResult.table
+
+  const rules: TransformerSet = {}
+  for(let spec of opts.resample_rules) {
+    const result = make_resampler_transform(spec.name, spec.args)
+    if(result.status != 'ok')
+      return fail(result.reason)
+    for(let source of spec.sources) {
+      const idx = delayTable.findIndex(row => row.rf_input == source)
+      if(idx == -1)
+        return fail(`RF Source ID ${source} not found in subfile.`)
+      rules[idx] = result.value
+    }
+  }
+
   const outputMeta = { ...meta, filename: outfilename}
   const outputDescriptor = {
     meta: outputMeta,
     resample: {
-      fns: {
-        32: make_phase_gradient_resampler(1/8),
-        34: make_phase_gradient_resampler(1/8),
-      },
-      region: 1,
+      fns: rules,
+      region: opts.resample_region,
     },
     sections: {
       header: { content: headerResult.buf, type: 'buffer' },

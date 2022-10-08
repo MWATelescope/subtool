@@ -1,3 +1,6 @@
+import {ok, fail, all} from "./util.js"
+import {TransformSpec, Result} from "./types"
+
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
 Available commands:
@@ -110,14 +113,8 @@ varying phase delays.
 
   INPUT_FILE              Path to input subfile.
   OUTPUT_FILE             Path to write output subfile.
-  --phase=A[,B...]        Phase specifiers (see note below).
-
-Phase specifiers describe the phase shift for a specified source. The phase
-shift has a start and end value in millisamples:
-
-    <source>:<start>:<end>
-
-Voltages are resampled with linear interpolation.
+  --rules=A[,B...]        Transform rule specifier list.
+  --region=N              Transform with N surrounding samples.
 `
 
 const schema = {
@@ -264,13 +261,18 @@ const schema = {
   resample: {
     args: ["INPUT_FILE", "OUTPUT_FILE"],
     opts: {
-      "--phase": {
-        type: "phasespec-list",
-        prop: "resample_phase",
+      "--rules": {
+        type: "transform-spec-list",
+        prop: "resample_rules",
+      },
+      "--region": {
+        type: "uint",
+        prop: "resample_region",
       },
     },
     defaults: {
-      resample_phase: null,
+      resample_rules: [],
+      resample_region: 3,
     },
   },
   replace: {
@@ -322,10 +324,52 @@ const schema = {
   }
 }
 
-function parseVal(str: string, shape) {
+function parse_uint(str: string): Result<number> {
+  const num = Number.parseInt(str)
+  if(!Number.isInteger(num) || num < 0)
+    return fail(`Unsigned integer expected, got '${str}'`)
+  return ok(num)
+}
+
+function parse_number(str: string): Result<number> {
+  const num = Number(str)
+  if(typeof num != 'number' || isNaN(num))
+    return fail(`Number expected, got '${str}'`)
+  return ok(num)
+}
+
+function parse_transform_spec_list(s: string): Result<TransformSpec[]> {
+  const parts = s.split('),').map(x => `${x})`)
+  parts[parts.length-1] = parts[parts.length-1].slice(0, -1)
+  return all(parts.map(parse_transform_spec))
+}
+
+function parse_transform_spec(s: string): Result<TransformSpec> {
+  const matchObj = s.match(/^(?<source>[0-9,]*):(?<name>[a-zA-Z][a-zA-Z_-]*)\((?<args>[0-9,.-]*)\)$/)
+  if(matchObj == null)
+    return fail(`Invalid transform spec: ${s}`)
+
+  const sourcesResult = all(matchObj.groups.source.split(',').map(x => parse_uint(x)))
+  const argsResult = all(matchObj.groups.args.split(',').map(x => parse_number(x)))
+  if(sourcesResult.status != 'ok') return fail(`Invalid transform spec "${s}" - ${sourcesResult.reason}`)
+  if(argsResult.status != 'ok') return fail(`Invalid transform spec "${s}" - ${argsResult.reason}`)
+  
+  return ok({
+    sources: sourcesResult.value, 
+    name: matchObj.groups.name, 
+    args: argsResult.value
+  })
+}
+
+function parse_list<T>(str: string, fn: (s: string) => Result<T>): Result<T[]> {
+  return all(str.split(',').map(fn))
+}
+
+function parse_val(str: string, shape) {
   let val = null
+  let result = null
   if(str.length == 0) {
-    return {status: 'invalid'}
+    return fail('Invalid argument value - empty string.')
   }
   switch(shape.type) {
   case 'uint':
@@ -336,13 +380,14 @@ function parseVal(str: string, shape) {
       return {status: 'invalid'}
     break
   case 'uint-list':
-    val = []
-    for(let x of str.split(',').map(x => parseVal(x, {type: 'uint'})))  {
-      if(x.status == 'ok')
-        val.push(x.val)
-      else
-        return {status: 'invalid'}
-    }
+    result = parse_list(str, parse_uint)
+    if(result.status != 'ok') return result
+    val = result.value
+    break
+  case 'transform-spec-list':
+    result = parse_transform_spec_list(str)
+    if(result.status != 'ok') return result
+    val = result.value
     break
   case 'enum':
     if(shape.values.indexOf(str) == -1)
@@ -367,7 +412,7 @@ function parseVal(str: string, shape) {
   return {status: 'ok', val}
 }
 
-function parseOpt(name: string, remaining: string[], optSchema, opts) {
+function parse_opt(name: string, remaining: string[], optSchema, opts) {
   if(name.indexOf('=') != -1) {
     const [optName, optArg] = name.split('=')
     name = optName
@@ -386,16 +431,16 @@ function parseOpt(name: string, remaining: string[], optSchema, opts) {
   if(remaining.length == 0)
     return {status: 'err', reason: `${name} requires an argument.`}
 
-  const parseResult = parseVal(remaining[0], shape)
+  const parseResult = parse_val(remaining[0], shape)
   if(parseResult.status == 'ok')
     opts[shape.prop] = parseResult.val
   else
-    return {status: 'err', reason: `'${remaining[0]}' is not a valid argument for ${name}`}
+    return {status: 'err', reason: `'${remaining[0]}' is not a valid argument for ${name} - ${parseResult.reason}`}
   
   return {status: 'ok', remaining: remaining.slice(1)}
 }
 
-function parseOptions(args: string[], optSchema, opts) {
+function parse_options(args: string[], optSchema, opts) {
   if(args.length == 0) 
     return {status: 'ok', opts}
   
@@ -404,14 +449,14 @@ function parseOptions(args: string[], optSchema, opts) {
   if(!(arg[0] == '-' && arg.length > 1))
     return {status: 'err', reason: `Unexpected argument ${arg}`}
 
-  const parseResult = parseOpt(arg, remaining, optSchema, opts)
+  const parseResult = parse_opt(arg, remaining, optSchema, opts)
   if(parseResult.status != 'ok')
     return parseResult
 
-  return parseOptions(parseResult.remaining, optSchema, opts)
+  return parse_options(parseResult.remaining, optSchema, opts)
 }
 
-export function parseCommand(command: string, args: string[]) {
+export function parse_command(command: string, args: string[]) {
   if(!(command in schema))
     return {status: 'err', reason: `'${command}' is not a valid command. Run without arguments for usage information.`}
 
@@ -423,18 +468,18 @@ export function parseCommand(command: string, args: string[]) {
     return {status: 'err', reason: `Missing argument ${cmdSchema.args[fixedArgs.length]}`}
   const numOptArgs = args.length - numFixedArgs
   const optArgs = args.slice(0, numOptArgs)
-  const parseResult = parseOptions(optArgs, cmdSchema.opts, opts)
+  const parseResult = parse_options(optArgs, cmdSchema.opts, opts)
   if(parseResult.status != 'ok')
     return parseResult
   return {status: 'ok', command, fixedArgs, opts}
 }
 
-export function parseCommandLine(argList: string[]) {
+export function parse_command_line(argList: string[]) {
   if(argList.length == 0) {
     console.log(USAGE)
     return {status: 'ok', command: null}
   }
 
   const [command, ...args] = argList
-  return parseCommand(command, args)
+  return parse_command(command, args)
 }

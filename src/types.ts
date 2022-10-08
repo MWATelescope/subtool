@@ -86,8 +86,20 @@ export type SourceMap = {
 }
 
 /** A complex number. */
-export type Z = [number, number];
+export type Z = [number, number]
 
 /** Resampling transform function. */
 export type TransformFn = (prev: Int8Array, cur: Z, next: Int8Array, time: number) => Z
 export type TransformerSet =  { [index: number]: TransformFn }
+
+export type Result<T> = {
+  status: string;
+  value: T;
+  reason?: string;
+}
+
+export type TransformSpec = {
+  sources: number[];
+  name: string;
+  args: number[];
+}
