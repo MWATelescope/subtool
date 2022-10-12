@@ -2,7 +2,7 @@ import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor, 
 import { read_block, read_block_or_null } from './reader.js'
 import {FileHandle} from 'fs/promises';
 import {cache_create} from './cache.js';
-import {await_all, fail, ok, read_margin} from './util.js';
+import {await_all, fail, get_line, get_margin, ok, read_margin} from './util.js';
 
 
 export async function resample(fns: TransformerSet, region: number, infile: FileHandle, outfile: FileHandle, meta: Metadata) {
@@ -32,7 +32,6 @@ export async function resample(fns: TransformerSet, region: number, infile: File
   
     process.stderr.write(`${blockNum} `)
   }
-  //console.warn(`Cache stats: hits=${cache.stats.hits} misses=${cache.stats.misses} inserts=${cache.stats.inserts} flushes=${cache.stats.flushes} deletes=${cache.stats.deletes} retained=${cache.stats.retained} released=${cache.stats.released}`)
   return {status: 'ok', value: bytesWritten}
 }
 
@@ -134,25 +133,7 @@ export function make_resampler_transform(name: string, args: number[]): Result<T
   return ok(TRANSFORM_BUILDERS[name](...args))
 }
 
-/** Get the head or tail margin samples for a given source ID. */
-export function get_margin(id: number, data: Int8Array, meta: Metadata, getHead=true, includeOverlap=true) {
-  const lineSz = meta.margin_samples * 2
-  const offset = getHead ? 0 : lineSz
-  const position = id * lineSz * 2 + (getHead ? 0 : lineSz) + (!getHead && !includeOverlap ? lineSz/2 : 0)
-  const length = includeOverlap ? lineSz : lineSz/2
-  return data.subarray(position, position + length)
-}
 
-/** Get a whole block from the data section. */
-export function get_block(id: number, data: Int8Array, meta: Metadata) {
-  const sz = meta.samples_per_line * meta.num_sources * 2
-  return data.subarray(id * sz, (id+1) * sz)
-}
-
-/** Get a single line from a block. */
-export function get_line(id: number, blockData: Int8Array, meta: Metadata) {
-  return blockData.subarray(id * meta.samples_per_line * 2, (id+1) * meta.samples_per_line * 2)
-}
 
 ///** Get the head or tail margin samples for a given source ID. */
 //export function get_margin(id: number, data: Uint16Array, meta: Metadata, getHead=true) {

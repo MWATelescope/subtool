@@ -74,3 +74,8 @@ function flush(cache: Cache, target=0) {
   }
   return cache.capacity - cache.used >= target
 }
+
+/** Print debugging statistics to stderr. */
+export function print_cache_stats(cache: Cache) {
+  console.warn(`Cache stats: hits=${cache.stats.hits} misses=${cache.stats.misses} inserts=${cache.stats.inserts} flushes=${cache.stats.flushes} deletes=${cache.stats.deletes} retained=${cache.stats.retained} released=${cache.stats.released}`)
+}

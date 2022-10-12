@@ -1,10 +1,13 @@
 import * as fs from 'node:fs/promises'
 import { load_subfile, write_subfile } from './subfile.js'
-import { read_block, read_section } from './util.js'
-import type { Metadata } from './types'
+import { fail, get_line, ok } from './util.js'
+import type { Metadata, Result } from './types'
 import { FileHandle } from 'node:fs/promises'
+import {Cache, cache_create, print_cache_stats} from './cache.js'
+import {read_block, read_section, source_to_line} from './reader.js'
 
 export async function runDump(subfilename: string, outfilename: string, opts) {
+  const cache = cache_create(2 ** 30) // 1GB
   const loadResult = await load_subfile(subfilename)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
@@ -12,16 +15,16 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
   }
   const {file, meta} = loadResult
 
-  let result = null
+  let result: Result<ArrayBuffer> = null
   if(opts.dump_section == 'preamble') {
-    result = await dump_preamble(outfilename, file, meta)
+    result = await dump_preamble(outfilename, file, meta, cache)
     return
   } else if(opts.dump_section)
-    result = await read_section(opts.dump_section, file, meta)
+    result = await read_section(opts.dump_section, file, meta, cache)
   else if(Number.isInteger(opts.dump_block))
-    result = await read_block(opts.dump_block, file, meta)
+    result = await read_block(opts.dump_block, file, meta, cache)
   else if(Number.isInteger(opts.dump_source)) {
-    
+    result = await extract_source(opts.dump_source, file, meta, cache)
   } else {
     console.error('Nothing to do.')
     return
@@ -31,18 +34,38 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
     return
   }
   
-  const buf = result.buf
+  const buf = result.value
   await fs.writeFile(outfilename, new Uint8Array(buf))
   console.warn(`Wrote ${buf.byteLength} bytes to ${outfilename}`)
-
+  print_cache_stats(cache)
   return {status: 'ok'}
 }
 
-async function dump_preamble(outfilename: string, file: FileHandle, meta: Metadata) {
-  const headerResult = await read_section('header', file, meta)
-  const dtResult =     await read_section('dt', file, meta)
-  const udpmapResult = await read_section('udpmap', file, meta)
-  const marginResult = await read_section('margin', file, meta)
+async function extract_source(sourceId: number, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<ArrayBuffer>> {
+  const getLineResult = await source_to_line(sourceId, file, meta, cache)
+  if(getLineResult.status != 'ok')
+    return fail(getLineResult.reason)
+  const lineNum = getLineResult.value
+  const buf = new Int8Array(meta.samples_per_line * meta.blocks_per_sub * 2)
+  let pos = 0
+  for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
+    const result = await read_block(blockNum, file, meta, cache)
+    if(result.status != 'ok')
+      return result
+    const block = new Int8Array(result.value)
+    const line = get_line(lineNum, block, meta)
+    buf.set(line, pos)
+    pos += line.length
+  }
+  return ok(buf.buffer)
+}
+
+// ...this does not look right:
+async function dump_preamble(outfilename: string, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<ArrayBuffer>> {
+  /*const headerResult = await read_section('header', file, meta, cache)
+  const dtResult =     await read_section('dt', file, meta, cache)
+  const udpmapResult = await read_section('udpmap', file, meta, cache)
+  const marginResult = await read_section('margin', file, meta, cache)
   if(headerResult.status != 'ok') return headerResult
   if(dtResult.status != 'ok') return dtResult
   if(udpmapResult.status != 'ok') return udpmapResult
@@ -64,5 +87,6 @@ async function dump_preamble(outfilename: string, file: FileHandle, meta: Metada
     console.error(result.reason)
     return
   }
-  console.warn(`Wrote ${result.bytesWritten} bytes to ${outfilename}`)
+  console.warn(`Wrote ${result.bytesWritten} bytes to ${outfilename}`)*/
+  return fail('not implemented')
 }

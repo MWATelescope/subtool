@@ -115,6 +115,15 @@ varying phase delays.
   OUTPUT_FILE             Path to write output subfile.
   --rules=A[,B...]        Transform rule specifier list.
   --region=N              Transform with N surrounding samples.
+
+SIGNAL PROCESSOR COMMAND (dsp)
+Manipulate exported voltage data files.
+
+      subtool dsp [dsp_opts] <INPUT_FILE> <OUTPUT_FILE>
+  
+  INPUT_FILE              Path to input subfile.
+  OUTPUT_FILE             Path to write output subfile.
+  --rule=<TRANSFORM>      Transform rule specifier.
 `
 
 const schema = {
@@ -275,6 +284,18 @@ const schema = {
       resample_region: 3,
     },
   },
+  dsp: {
+    args: ["INPUT_FILE", "OUTPUT_FILE"],
+    opts: {
+      "--rule": {
+        type: "transform-spec",
+        prop: "dsp_rule",
+      },
+    },
+    defaults: {
+      dsp_rule: [],
+    },
+  },
   replace: {
     args: ["INPUT_FILE", "OUTPUT_FILE"],
     opts: {
@@ -316,10 +337,15 @@ const schema = {
         type: "uint",
         prop: "dump_block",
       },
+      "--source": {
+        type: "uint",
+        prop: "dump_source",
+      }
     },
     defaults: {
       dump_section: null,
       dump_block: null,
+      dump_source: null,
     },
   }
 }

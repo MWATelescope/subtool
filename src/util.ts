@@ -146,3 +146,23 @@ export function fail<T>(reason: string): Result<T> {
 export function ok<T>(value: T = null): Result<T> {
   return {status: 'ok', value}
 }
+
+/** Get the head or tail margin samples for a given source ID. */
+export function get_margin(id: number, data: Int8Array, meta: Metadata, getHead=true, includeOverlap=true) {
+  const lineSz = meta.margin_samples * 2
+  const offset = getHead ? 0 : lineSz
+  const position = id * lineSz * 2 + (getHead ? 0 : lineSz) + (!getHead && !includeOverlap ? lineSz/2 : 0)
+  const length = includeOverlap ? lineSz : lineSz/2
+  return data.subarray(position, position + length)
+}
+
+/** Get a whole block from the data section. */
+export function get_block(id: number, data: Int8Array, meta: Metadata) {
+  const sz = meta.samples_per_line * meta.num_sources * 2
+  return data.subarray(id * sz, (id+1) * sz)
+}
+
+/** Get a single line from a block. */
+export function get_line(id: number, blockData: Int8Array, meta: Metadata) {
+  return blockData.subarray(id * meta.samples_per_line * 2, (id+1) * meta.samples_per_line * 2)
+}
