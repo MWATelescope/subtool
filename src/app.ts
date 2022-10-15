@@ -4,10 +4,11 @@ import * as dt from './dt.js'
 import * as dump from './dump.js'
 import { load_subfile, write_subfile } from './subfile.js'
 import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
-import { read_section, initMetadata, read_block, write_section, ok, fail } from './util.js'
-import type { Metadata, OutputDescriptor, SourceMap, TransformerSet, TransformSpec } from './types'
+import { read_section, init_metadata, read_block, write_section, ok, fail } from './util.js'
+import type { Metadata, OutputDescriptor, Result, SourceMap, TransformerSet, TransformSpec } from './types'
 import { FileHandle } from 'node:fs/promises'
 import {make_phase_gradient_resampler, make_resampler_transform} from './resample.js'
+import {cache_create} from './cache.js'
 
 
 async function main(args: string[]) {
@@ -36,6 +37,8 @@ async function main(args: string[]) {
     return runUnset(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case 'resample':
     return runResample(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
+  case 'bake':
+    return runBake(parseResult.fixedArgs[0], parseResult.opts)
   case null:
     return ok()
   default:
@@ -49,8 +52,8 @@ async function runGet(key: string, filename: string, opts) {
   const loadResult = await load_subfile(filename)
   if(loadResult.status != 'ok')
     return loadResult
-  const {meta, file} = loadResult
-  const headerResult: any = await read_header(file, meta)
+  const {meta, file, cache} = loadResult
+  const headerResult: any = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
   const header = headerResult.header
@@ -67,8 +70,8 @@ async function runSet(key: string, value: string, filename: string, opts) {
   const loadResult = await load_subfile(filename, 'r+')
   if(loadResult.status != 'ok')
     return loadResult
-  const {meta, file} = loadResult
-  const headerResult: any = await read_header(file, meta)
+  const {meta, file, cache} = loadResult
+  const headerResult: any = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
 
@@ -90,8 +93,8 @@ async function runUnset(key: string, filename: string, opts) {
   const loadResult = await load_subfile(filename, 'r+')
   if(loadResult.status != 'ok')
     return loadResult
-  const {meta, file} = loadResult
-  const headerResult: any = await read_header(file, meta)
+  const {meta, file, cache} = loadResult
+  const headerResult: any = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
 
@@ -198,7 +201,7 @@ async function runShow(filename: string, opts) {
 }
 
 async function runDt(filename: string, opts) {
-  const meta = initMetadata()
+  const meta = init_metadata()
   meta.filename = filename
   meta.num_sources = opts.num_sources_in
   meta.num_frac_delays = opts.num_frac_delays_in
@@ -253,7 +256,7 @@ async function runRepoint(infilename, outfilename, opts) {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta} = loadResult
+  const {file, meta, cache} = loadResult
 
   const headerResult = await read_section('header', file, meta)
   const dtResult =     await read_section('dt', file, meta)
@@ -264,7 +267,7 @@ async function runRepoint(infilename, outfilename, opts) {
   if(udpmapResult.status != 'ok') return udpmapResult
   if(marginResult.status != 'ok') return marginResult
 
-  const dtMeta = initMetadata()
+  const dtMeta = init_metadata()
   dtMeta.filename = opts.delay_table_filename
   const loadDtResult: any = await dt.load_delay_table(opts.delay_table_filename, {format_in: 'auto'}, dtMeta)
   if(loadDtResult.status != 'ok') {
@@ -296,7 +299,7 @@ async function runRepoint(infilename, outfilename, opts) {
       data: { file, type: 'file' },
     },
   }
-  const writeResult = await write_subfile(outputDescriptor, opts)
+  const writeResult = await write_subfile(outputDescriptor, opts, cache)
   if(writeResult.status != 'ok')
     return writeResult
 
@@ -309,7 +312,7 @@ async function runReplace(infilename: string, outfilename: string, opts) {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta} = loadResult
+  const {file, meta, cache} = loadResult
 
   const headerResult = await read_section('header', file, meta)
   const dtResult =     await read_section('dt', file, meta)
@@ -342,7 +345,7 @@ async function runReplace(infilename: string, outfilename: string, opts) {
       data: { file, type: 'file' },
     },
   }
-  const writeResult = await write_subfile(outputDescriptor, opts)
+  const writeResult = await write_subfile(outputDescriptor, opts, cache)
   if(writeResult.status != 'ok')
     return writeResult
 
@@ -355,7 +358,7 @@ async function runResample(infilename: string, outfilename: string, opts) {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta} = loadResult
+  const {file, meta, cache} = loadResult
 
   const headerResult = await read_section('header', file, meta)
   const dtResult =     await read_section('dt', file, meta)
@@ -399,12 +402,24 @@ async function runResample(infilename: string, outfilename: string, opts) {
       data: { file, type: 'file' },
     },
   }
-  const writeResult = await write_subfile(outputDescriptor, opts)
+  const writeResult = await write_subfile(outputDescriptor, opts, cache)
   if(writeResult.status != 'ok')
     return writeResult
   console.warn(`Wrote ${writeResult.bytesWritten} bytes to ${outfilename}.`)
 
   return {status: 'ok'}
+}
+
+async function runBake(ifname: string, opts): Promise<Result<void>> {
+  const cache = cache_create(6 * 2 ** 30) // 6GB (whole subfile)
+  const loadResult = await load_subfile(ifname, 'r+', cache)
+  if(loadResult.status != 'ok')
+    return fail(loadResult.reason)
+  const {file, meta} = loadResult
+  
+  const dtResult = dt.read_delay_table(file, meta, cache)
+
+  return ok()
 }
 
 

@@ -35,7 +35,8 @@ export type Metadata = {
   udpmap_present: boolean;    // (ALL) is a packet map section present in the file?
   udpmap_offset: number;      // (sub) byte offset of packet map
   udpmap_length: number;      // (sub) byte length of packet map
-  sources: number[];          // (ALL) rf sources in order of appearance
+  sources: number[];          // (sub) rf sources in order of appearance
+  delay_table: DelayTable;    // (sub) delay table
 }
 
 export type OutputDescriptor = {
@@ -81,6 +82,8 @@ export type DelayTableEntry = {
   frac_delay: Int16Array;
 }
 
+export type DelayTable = DelayTableEntry[]
+
 export type SourceMap = {
   [k: number]: number;
 }
@@ -91,6 +94,7 @@ export type Z = [number, number]
 /** Resampling transform function. */
 export type TransformFn = (prev: Int8Array, cur: Z, next: Int8Array, time: number) => Z
 export type TransformerSet =  { [index: number]: TransformFn }
+export type BlockTransform = (idata: Int8Array, odata: Int8Array, index: number) => void
 
 export type Result<T> = {
   status: string;

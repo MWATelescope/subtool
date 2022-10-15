@@ -4,7 +4,7 @@ import {TransformSpec, Result} from "./types"
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
 Available commands:
-  info, get, set, unset, show, dt, dump, repoint, replace, resample
+  info, get, set, unset, show, dt, dump, repoint, replace, resample, bake
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -104,6 +104,7 @@ Write binary contents of a subfile section to a file.
                             preamble Header + block 0.
   --block=N               Extract the Nth block (sample data starts at N=1).
   --source=ID             Extract all the samples from a given source ID.
+  --with-margin           When extracting samples, include margin data.
 
 RESAMPLE COMMAND (replace)
 Write a new subfile, resampling voltage data from specified sources with
@@ -116,6 +117,15 @@ varying phase delays.
   --rules=A[,B...]        Transform rule specifier list.
   --region=N              Transform with N surrounding samples.
 
+BAKE-IN DELAYS COMMAND (bake)
+Apply fractional delays to the voltage data in a subfile and reset the delay
+table values to zero. Operates in-place.
+
+      subtool bake <FILE>
+
+  FILE                    Path to subfile.    
+`
+/*
 SIGNAL PROCESSOR COMMAND (dsp)
 Manipulate exported voltage data files.
 
@@ -125,6 +135,7 @@ Manipulate exported voltage data files.
   OUTPUT_FILE             Path to write output subfile.
   --rule=<TRANSFORM>      Transform rule specifier.
 `
+*/
 
 const schema = {
   show: {
@@ -284,18 +295,6 @@ const schema = {
       resample_region: 3,
     },
   },
-  dsp: {
-    args: ["INPUT_FILE", "OUTPUT_FILE"],
-    opts: {
-      "--rule": {
-        type: "transform-spec",
-        prop: "dsp_rule",
-      },
-    },
-    defaults: {
-      dsp_rule: [],
-    },
-  },
   replace: {
     args: ["INPUT_FILE", "OUTPUT_FILE"],
     opts: {
@@ -340,14 +339,34 @@ const schema = {
       "--source": {
         type: "uint",
         prop: "dump_source",
+      },
+      "--with-margin": {
+        type: "flag",
+        prop: "dump_with_margin",
       }
     },
     defaults: {
       dump_section: null,
       dump_block: null,
       dump_source: null,
+      dump_with_margin: true,
     },
-  }
+  },
+  bake: {
+    args: ["SUBFILE"],
+  },
+  /*dsp: {
+    args: ["INPUT_FILE", "OUTPUT_FILE"],
+    opts: {
+      "--rule": {
+        type: "transform-spec",
+        prop: "dsp_rule",
+      },
+    },
+    defaults: {
+      dsp_rule: [],
+    },
+  },*/
 }
 
 function parse_uint(str: string): Result<number> {

@@ -66,7 +66,7 @@ export async function read_line(lineNum: number, blockNum: number, file: FileHan
 }
 
 /** Get the line number for a source ID. */
-export async function read_delay_table(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<any>> {
+/*export async function read_delay_table(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<any>> {
   const readResult = await read_section('dt', file, meta, cache)
   if(readResult.status != 'ok')
     return fail(readResult.reason)
@@ -75,21 +75,9 @@ export async function read_delay_table(file: FileHandle, meta: Metadata, cache: 
   if(parseResult.status != 'ok')
     return fail(parseResult.reason)
   return ok(parseResult.table)
-}
+}*/
 
-/** Get the line number for a source ID. */
-export async function source_to_line(sourceId: number, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<number>> {
-  const readResult = await read_delay_table(file, meta, cache)
-  if(readResult.status != 'ok')
-    return fail(readResult.reason)
-  const table = readResult.value
-  const idx = table.findIndex(row => row.rf_input == sourceId)
-  if(idx == -1)
-    return fail(`RF Source ID ${sourceId} not found in subfile.`)
-  return ok(idx)
-}
-
-/** Read the head or tail margin samples for a given source ID. 
+/** Read the head or tail margin samples for a given line ID (not source ID!). 
  * 
  * The `getHead` argument specifies whether to get the head or tail margin.
  */

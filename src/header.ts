@@ -1,5 +1,8 @@
-import {Metadata} from './types.js'
-import { read_section } from './util.js'
+import {Metadata, Result} from './types.js'
+import type { Cache } from './cache'
+import { read_section } from './reader.js'
+import {FileHandle} from 'fs/promises'
+import {fail, ok} from './util.js'
 
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
@@ -82,13 +85,13 @@ export function parse_header(buf) {
 }
 
 /** Read the header section from a subfile. */
-export async function read_header(file, meta) {
-  const sectionResult = await read_section('header', file, meta)
+export async function read_header(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<any>> {
+  const sectionResult = await read_section('header', file, meta, cache)
   if(sectionResult.status != 'ok')
-    return sectionResult
+    return fail(sectionResult.reason)
 
-  const header = parse_header(sectionResult.buf)
-  return {status: 'ok', header}
+  const header = parse_header(sectionResult.value)
+  return ok(header)
 }
 
 export function set_header_value(key, value, header, force=false) {

@@ -67,14 +67,21 @@ import * as fs from 'node:fs/promises'
 import { FileHandle } from 'fs/promises'
 import * as dt from './dt.js'
 import { read_header } from './header.js'
-import { initMetadata, read_block } from './util.js'
+import { fail, init_metadata, ok } from './util.js'
 import * as rp from './repoint.js'
 import * as rs from './resample.js'
-import type { Metadata, OutputDescriptor, SourceMap } from './types'
+import type { Metadata, OutputDescriptor, Result, SourceMap } from './types'
+import type { Cache } from './cache'
+import {cache_create} from './cache.js'
+import {read_block} from './reader.js'
+import {read_delay_table} from './dt.js'
 
 /** Load a subfile, gather basic info. */
-export async function load_subfile(filename: string, mode='r') {
-  const meta: Metadata = initMetadata()
+export async function load_subfile(filename: string, mode='r', cache: Cache = null) {
+  if(cache == null)
+    cache = cache_create(2 ** 30) // 1GB
+
+  const meta: Metadata = init_metadata()
   const file: FileHandle = await fs.open(filename, mode)
 
   meta.filename = filename
@@ -90,7 +97,7 @@ export async function load_subfile(filename: string, mode='r') {
   meta.margin_packets = 2
   meta.samples_per_packet = 2048
   
-  const headerResult: any = await read_header(file, meta)
+  const headerResult: any = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
   const header = headerResult.header
@@ -121,20 +128,21 @@ export async function load_subfile(filename: string, mode='r') {
   meta.margin_offset = meta.udpmap_offset + meta.udpmap_length
   meta.margin_length = meta.num_sources * meta.margin_samples * 2 * 2
 
-  const dtResult: any = await dt.read_delay_table(file, meta)
+  const dtResult = await dt.read_delay_table(file, meta, cache)
   if(dtResult.status != 'ok')
     return dtResult
-  const delayTable = dtResult.table
+  const delayTable = dtResult.value
   
+  meta.delay_table = delayTable
   meta.sources = delayTable.map(x => x.rf_input)
 
-  return {status: 'ok', file, meta, header}
+  return {status: 'ok', file, meta, header, cache}
 }
 
 
 
 /** Write out a subfile given an output descriptor. */
-export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
+export async function write_subfile(output_descriptor: OutputDescriptor, opts, cache: Cache) {
   const { meta, repoint, remap, resample, sections } = output_descriptor
   let bytesWritten: number = 0
   // Create a buffer to hold the preamble: header + block 0
@@ -157,10 +165,10 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
       const outBlockBuf = new ArrayBuffer(meta.block_length)
       const outputBlock = new Uint16Array(outBlockBuf)
       for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
-        const blockResult = await read_block(blockNum, sections.data.file, meta)
+        const blockResult = await read_block(blockNum, sections.data.file, meta, cache)
         if(blockResult.status != 'ok')
           return blockResult
-        const inputBlock = new Uint16Array(blockResult.buf)
+        const inputBlock = new Uint16Array(blockResult.value)
         copy_block_with_remapping(inputBlock, outputBlock, srcMap, meta.sources, meta)
         await file.write(Buffer.from(outBlockBuf))
         outputBlock.fill(0)
@@ -179,11 +187,11 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts) {
       bytesWritten += resampleResult.value
     } else {  
      for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
-       const blockResult = await read_block(blockNum, sections.data.file, meta)
+       const blockResult = await read_block(blockNum, sections.data.file, meta, cache)
        if(blockResult.status != 'ok')
          return blockResult
-       await file.write(Buffer.from(blockResult.buf))
-       bytesWritten += blockResult.buf.byteLength
+       await file.write(Buffer.from(blockResult.value))
+       bytesWritten += blockResult.value.byteLength
        process.stderr.write(`${blockNum} `)
       }
     }
@@ -202,4 +210,17 @@ function copy_block_with_remapping(inBlk: Uint16Array, outBlk: Uint16Array, map:
     const outputLine = rp.get_line(outputLineIndex, outBlk, meta)
     outputLine.set(inputLine)
   }
+}
+
+
+/** Get the line number for a source ID. */
+export async function source_to_line(sourceId: number, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<number>> {
+  const readResult = await read_delay_table(file, meta, cache)
+  if(readResult.status != 'ok')
+    return fail(readResult.reason)
+  const table = readResult.value
+  const idx = table.findIndex(row => row.rf_input == sourceId)
+  if(idx == -1)
+    return fail(`RF Source ID ${sourceId} not found in subfile.`)
+  return ok(idx)
 }

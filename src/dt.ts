@@ -1,9 +1,11 @@
 /** Delay table loading, parsing, formatting and serialisation. */
 
 import * as fs from 'node:fs/promises'
-import { read_section } from './util.js'
-import type { Metadata, DelayTableEntry } from './types'
+import { fail, ok } from './util.js'
+import { read_section } from './reader.js'
+import type { Metadata, DelayTableEntry, DelayTable, Result } from './types'
 import { FileHandle } from 'node:fs/promises'
+import {Cache} from './cache.js'
 
 /*
  *    PARSING
@@ -141,16 +143,16 @@ export function serialise_delay_table(table, num_sources, num_fracs) {
  */
 
 /** Read the delay table section from an open subfile. */
-export async function read_delay_table(file: FileHandle, meta: Metadata) {
-  const sectionResult = await read_section('dt', file, meta)
+export async function read_delay_table(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<DelayTable>> {
+  const sectionResult = await read_section('dt', file, meta, cache)
   if(sectionResult.status != 'ok')
-    return sectionResult
+    return fail(sectionResult.reason)
 
-  const parseResult: any = parse_delay_table_binary(sectionResult.buf, meta)
+  const parseResult: any = parse_delay_table_binary(sectionResult.value, meta)
   if(parseResult.status != 'ok')
-    return parseResult
+    return fail(parseResult.reason)
 
-  return {status: 'ok', table: parseResult.table}
+  return ok(parseResult.table)
 }
 
 /** Load a delay table from a CSV file. */
@@ -354,4 +356,8 @@ export function compare_delays(from, to) {
     frac_delay: row.frac_delay.map((x, j) => x - from[i].frac_delay[j]),
   }))
   return {status: 'ok', table}
+}
+
+function flip_fracs(table: DelayTable): DelayTable {
+  return table.map(row => ({ ...row, frac_delay: row.frac_delay.map(x => -x) }))
 }

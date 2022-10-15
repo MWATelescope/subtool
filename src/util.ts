@@ -2,43 +2,46 @@ import { FileHandle } from 'fs/promises'
 import type { Metadata, Result, Z } from './types'
 
 /** Create a new metadata object, used for tracking information about files. */
-export const initMetadata = () => ({
-  filename: null,          
-  filetype: null,          
-  observation_id: null,    
-  subobservation_id: null, 
-  num_sources: null,       
-  num_frac_delays: null,   
-  sample_rate: null,       
-  secs_per_subobs: null,   
-  samples_per_line: null,  
-  samples_per_packet: null,
-  udp_payload_length: null,
-  udp_per_rf_per_sub: null,
-  sub_line_size: null,     
-  blocks_per_sub: null,    
-  blocks_per_sec: null,
-  fft_per_block: null,     
-  block_length: null,      
-  margin_packets: null,    
-  margin_samples: null,    
-  dt_present: null,        
-  dt_offset: null,         
-  dt_length: null,         
-  header_present: null,    
-  header_offset: null,     
-  header_length: null,     
-  data_present: null,      
-  data_offset: null,       
-  data_length: null,       
-  margin_present: null,    
-  margin_offset: null,     
-  margin_length: null,     
-  udpmap_present: null,    
-  udpmap_offset: null,     
-  udpmap_length: null,     
-  sources: null,           
-})
+export function init_metadata(): Metadata { 
+  return {
+    filename: null,          
+    filetype: null,          
+    observation_id: null,    
+    subobservation_id: null, 
+    num_sources: null,       
+    num_frac_delays: null,   
+    sample_rate: null,       
+    secs_per_subobs: null,   
+    samples_per_line: null,  
+    samples_per_packet: null,
+    udp_payload_length: null,
+    udp_per_rf_per_sub: null,
+    sub_line_size: null,     
+    blocks_per_sub: null,    
+    blocks_per_sec: null,
+    fft_per_block: null,     
+    block_length: null,      
+    margin_packets: null,    
+    margin_samples: null,    
+    dt_present: null,        
+    dt_offset: null,         
+    dt_length: null,         
+    header_present: null,    
+    header_offset: null,     
+    header_length: null,     
+    data_present: null,      
+    data_offset: null,       
+    data_length: null,       
+    margin_present: null,    
+    margin_offset: null,     
+    margin_length: null,     
+    udpmap_present: null,    
+    udpmap_offset: null,     
+    udpmap_length: null,     
+    sources: null,      
+    delay_table: null,     
+  }
+}
 
 /** Read section data from a subfile into an ArrayBuffer. */
 export async function read_section(name: string, file: FileHandle, meta: Metadata) {
@@ -166,3 +169,12 @@ export function get_block(id: number, data: Int8Array, meta: Metadata) {
 export function get_line(id: number, blockData: Int8Array, meta: Metadata) {
   return blockData.subarray(id * meta.samples_per_line * 2, (id+1) * meta.samples_per_line * 2)
 }
+
+export function complex_mul([a, b]:Z, [c, d]:Z): Z {
+  return [a*c - b*d, a*d + b*c]
+}
+
+export function complex_rotate(radians: number, x: Z): Z {
+  return complex_mul(x, [Math.cos(radians), -Math.sin(radians)]) 
+}
+

@@ -1,10 +1,10 @@
 import * as fs from 'node:fs/promises'
-import { load_subfile, write_subfile } from './subfile.js'
+import { load_subfile, write_subfile, source_to_line } from './subfile.js'
 import { fail, get_line, ok } from './util.js'
 import type { Metadata, Result } from './types'
 import { FileHandle } from 'node:fs/promises'
 import {Cache, cache_create, print_cache_stats} from './cache.js'
-import {read_block, read_section, source_to_line} from './reader.js'
+import {read_block, read_margin_line, read_section} from './reader.js'
 
 export async function runDump(subfilename: string, outfilename: string, opts) {
   const cache = cache_create(2 ** 30) // 1GB
@@ -24,7 +24,7 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
   else if(Number.isInteger(opts.dump_block))
     result = await read_block(opts.dump_block, file, meta, cache)
   else if(Number.isInteger(opts.dump_source)) {
-    result = await extract_source(opts.dump_source, file, meta, cache)
+    result = await extract_source(opts.dump_source, opts.dump_with_margin, file, meta, cache)
   } else {
     console.error('Nothing to do.')
     return
@@ -41,13 +41,32 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
   return {status: 'ok'}
 }
 
-async function extract_source(sourceId: number, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<ArrayBuffer>> {
+/** Get the voltage sample data for a specified source ID.
+ * 
+ * Not implemented yet:
+ * If the `includeMargin` option is set, all of the samples including the
+ * margin data is extracted. If the delay table indicates the a whole-sample
+ * delay has been applied, the margin samples are shifted so that the extracted
+ * data represents a continuous stream with no repeated or omitted samples, but
+ * the length of the stream is unaffected. This will result in N zero-valued
+ * samples at the beginning or end of the extracted stream, where N is the
+ * whole-sample delay. This is 
+ */
+async function extract_source(sourceId: number, includeMargin: boolean, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<ArrayBuffer>> {
   const getLineResult = await source_to_line(sourceId, file, meta, cache)
   if(getLineResult.status != 'ok')
     return fail(getLineResult.reason)
   const lineNum = getLineResult.value
-  const buf = new Int8Array(meta.samples_per_line * meta.blocks_per_sub * 2)
-  let pos = 0
+  const bufSize = includeMargin ? meta.samples_per_line * meta.blocks_per_sub * 2 + meta.margin_samples*2 // 2 bytes each for half the margin samples per end * 2 ends
+                                : meta.samples_per_line * meta.blocks_per_sub * 2
+  const buf = new Int8Array(bufSize)
+  if(includeMargin) {
+    return fail('Extracting source with margin data is not implemented yet.')
+    let result = await read_margin_line(lineNum, file, meta, cache, true)
+    if(result.status != 'ok')
+      return fail(result.reason)
+  }
+  let pos = includeMargin ? meta.margin_samples : 0
   for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
     const result = await read_block(blockNum, file, meta, cache)
     if(result.status != 'ok')
