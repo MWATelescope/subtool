@@ -7,45 +7,39 @@
 
 import {open, readFile, writeFile} from "fs/promises";
 import FFT from 'fft.js'
-import {BlockTransform, DelayTable, Result, Z} from "./types";
-import {complex_rotate, fail, ok} from "./util";
-import {load_delay_table} from "./dt";
+import {BlockTransform, DelayTable, Metadata, Result, Z} from "./types";
+import {complex_rotate, fail, ok} from "./util.js";
+import {load_delay_table} from "./dt.js";
 
 export async function runDsp(rule: string, ifname: string, ofname: string): Promise<Result<void>> {
   const ibuf = await readFile(ifname)
   const idata = new Int8Array(ibuf)
   const odata = new Int8Array(idata.byteLength)
 
-  run_frac_delay_correction(62, 'dt.csv', idata, odata)
+  //run_frac_delay_correction(62, 'dt.csv', idata, odata)
 
   await writeFile(ofname, Buffer.from(odata.buffer))
   return ok()
 }
 
-export async function run_frac_delay_correction(sourceId: number, dtfilename: string, idata: Int8Array, odata: Int8Array): Promise<Result<void>> {
-  const dtResult: any = await load_delay_table(dtfilename, null, null)
-  if(dtResult.status != 'ok')
-    return fail(dtResult.reason)
-  const delayTable: DelayTable = dtResult.table
-  const rowIdx = delayTable.findIndex(row => row.rf_input == sourceId)
-  if(rowIdx == -1)
-    return fail(`Source ID ${sourceId} not found in delay table ${dtfilename}.`)
-  const delays = delayTable[rowIdx].frac_delay
-  const sample_rate = 1280000
-  const filter = make_frac_delay_filter(delays, 157000000, sample_rate*8, 4096, sample_rate)
-  apply_block_transform(filter, 4096, idata, odata)
+export function bake_delays(delays: Int16Array, fftsize: number, idata: Int8Array, odata: Int8Array, meta: Metadata): Result<void> {
+  const sample_rate = meta.sample_rate
+  const filter = make_frac_delay_filter(delays, 157000000, sample_rate*8, fftsize, sample_rate)
+  apply_block_transform(filter, fftsize, idata, odata)
   return ok()
 }
 
 function apply_block_transform(fn: BlockTransform, size: number, idata: Int8Array, odata: Int8Array): void {
-  if(size % idata.length != 0)
-    console.warn(`Warning: applying block transform to data that is not a multiple in length of the block size.`)
+  //if(idata.length % size != 0)
+  //  console.warn(`Warning: applying block transform to data that is not a multiple in length of the block size.`)
 
-  const nblocks = Math.ceil(size / idata.length)
+  const nblocks = Math.floor(idata.length / (2*size))
   for(let i=0; i<nblocks; i++) {
-    const iblock = idata.subarray(i*size, (i+1)*size)
-    const oblock = odata.subarray(i*size, (i+1)*size)
+    const iblock = idata.subarray(i*size*2, (i+1)*size*2)
+    const oblock = odata.subarray(i*size*2, (i+1)*size*2)
     fn(iblock, oblock, i)
+    //console.log(iblock, oblock)
+    //if(i>=3) { throw 'bang' }
   }
 }
 
@@ -91,6 +85,7 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
     const dcOffset = centre * delay * Math.PI * 2
     
     fft.transform(istorage, idata)
+ 
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {
       const freq = sampleIdx / (fft_size * fft_len)
       const fineOffset = freq * delay * Math.PI * 2
@@ -101,6 +96,8 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
       istorage[sampleIdx*2+1] = newSample[1]
     }
     fft.inverseTransform(ostorage, istorage)
+    //console.log(blockIdx, odata.length, ostorage.length)
+    odata.set(ostorage)
   }
   return filter
 }

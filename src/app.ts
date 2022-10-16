@@ -2,13 +2,16 @@ import * as fs from 'node:fs/promises'
 import { parse_command_line } from './cli.js'
 import * as dt from './dt.js'
 import * as dump from './dump.js'
-import { load_subfile, write_subfile } from './subfile.js'
+import { load_subfile, overwrite_delay_table, overwrite_samples, write_subfile } from './subfile.js'
 import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
-import { read_section, init_metadata, read_block, write_section, ok, fail } from './util.js'
+import { read_section, init_metadata, write_section, ok, fail } from './util.js'
 import type { Metadata, OutputDescriptor, Result, SourceMap, TransformerSet, TransformSpec } from './types'
 import { FileHandle } from 'node:fs/promises'
 import {make_phase_gradient_resampler, make_resampler_transform} from './resample.js'
-import {cache_create} from './cache.js'
+import {cache_create, print_cache_stats} from './cache.js'
+import {extract_source} from './dump.js'
+import {bake_delays} from './dsp.js'
+import {read_block} from './reader.js'
 
 
 async function main(args: string[]) {
@@ -121,6 +124,7 @@ async function runShow(filename: string, opts) {
   if(loadResult.status != 'ok')
     return loadResult
   const meta = loadResult.meta
+  const cache = loadResult.cache
 
   // Read header
   // We always do this, even if we're not printing it, since everything else depends on it (except
@@ -176,11 +180,11 @@ async function runShow(filename: string, opts) {
       selected_ids.push(i)
   }
   
-  const dataBlockResult: any = await read_block(opts.show_block, file, meta)
+  const dataBlockResult = await read_block(opts.show_block, file, meta, cache)
   if(dataBlockResult.status != 'ok')
     return dataBlockResult
   console.log('\nVoltage data:')
-  const dataBlock = new Int8Array(dataBlockResult.buf)
+  const dataBlock = new Int8Array(dataBlockResult.value)
   const nSamples = Math.min(meta.samples_per_line, opts.num_samples)
   for(let i of selected_ids) {
     const xs = dataBlock.subarray(i*meta.sub_line_size, (i+1)*meta.sub_line_size)
@@ -415,10 +419,32 @@ async function runBake(ifname: string, opts): Promise<Result<void>> {
   const loadResult = await load_subfile(ifname, 'r+', cache)
   if(loadResult.status != 'ok')
     return fail(loadResult.reason)
-  const {file, meta} = loadResult
-  
-  const dtResult = dt.read_delay_table(file, meta, cache)
-
+  const {file} = loadResult
+  const meta: Metadata = loadResult.meta
+  process.stderr.write('Preloading sample data')
+  for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
+    await read_block(blockNum, file, meta, cache)
+    if(blockNum % 10 == 0)
+      process.stderr.write('.')
+  }
+  process.stderr.write(' done.\n')
+  process.stderr.write('Baking delays for sources...')
+  for(let lineNum=0; lineNum<meta.num_sources; lineNum++) {
+    const row = meta.delay_table[lineNum]
+    const extractResult = await extract_source(lineNum, false, file, meta, cache)
+    if(extractResult.status != 'ok')
+      return fail(extractResult.reason)
+    const idata = new Int8Array(extractResult.value)
+    const odata = new Int8Array(idata.byteLength)
+    bake_delays(row.frac_delay, opts.bake_fft_size, idata, odata, meta)
+    await overwrite_samples(lineNum, odata, meta, file)
+    row.frac_delay.fill(0)
+    process.stderr.write(` ${lineNum}`)
+  }
+  process.stderr.write(' ...done.\n')
+  console.warn('Writing delay table.')
+  await overwrite_delay_table(meta.delay_table, meta, file)
+  print_cache_stats(cache)
   return ok()
 }
 

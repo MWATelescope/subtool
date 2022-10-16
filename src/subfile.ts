@@ -70,7 +70,7 @@ import { read_header } from './header.js'
 import { fail, init_metadata, ok } from './util.js'
 import * as rp from './repoint.js'
 import * as rs from './resample.js'
-import type { Metadata, OutputDescriptor, Result, SourceMap } from './types'
+import type { DelayTable, Metadata, OutputDescriptor, Result, SourceMap } from './types'
 import type { Cache } from './cache'
 import {cache_create} from './cache.js'
 import {read_block} from './reader.js'
@@ -100,7 +100,7 @@ export async function load_subfile(filename: string, mode='r', cache: Cache = nu
   const headerResult: any = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
-  const header = headerResult.header
+  const header = headerResult.value
 
   meta.num_sources = header.NINPUTS
   meta.sample_rate = header.SAMPLE_RATE
@@ -223,4 +223,32 @@ export async function source_to_line(sourceId: number, file: FileHandle, meta: M
   if(idx == -1)
     return fail(`RF Source ID ${sourceId} not found in subfile.`)
   return ok(idx)
+}
+
+/** Overwrite the samples for a source with a given line number. */
+export async function overwrite_samples(lineNum: number, samples: Int8Array, meta: Metadata, file: FileHandle): Promise<Result<void>> {
+  for(let blockNum=0; blockNum<meta.blocks_per_sub; blockNum++) {
+    const position = blockNum * meta.sub_line_size
+    const length = meta.sub_line_size
+    const line = samples.subarray(position, position + length)
+    await overwrite_line(lineNum, blockNum, line, meta, file)
+  }
+  return ok()
+}
+
+/** Overwrite the samples for a given line and *zero-indexed* data block ID. */
+export async function overwrite_line(lineNum: number, blockNum: number, samples: Int8Array, meta: Metadata, file: FileHandle): Promise<Result<void>> {
+  const position = meta.data_offset + blockNum * meta.block_length + lineNum * meta.sub_line_size
+  const length = meta.sub_line_size
+  await file.write(Buffer.from(samples), 0, length, position)
+  return ok()
+}
+
+/** Overwrite the delay table. */
+export async function overwrite_delay_table(table: DelayTable, meta: Metadata, file: FileHandle): Promise<Result<void>> {
+  const buf = dt.serialise_delay_table(table, meta.num_sources, meta.num_frac_delays)
+  const position = meta.dt_offset
+  const length = meta.dt_length
+  await file.write(Buffer.from(buf), 0, length, position)
+  return ok()
 }

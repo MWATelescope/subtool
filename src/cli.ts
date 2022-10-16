@@ -354,6 +354,15 @@ const schema = {
   },
   bake: {
     args: ["SUBFILE"],
+    opts: {
+      "--fft-size": {
+        type: "uint",
+        prop: "bake_fft_size",
+      },
+    },
+    defaults: {
+      bake_fft_size: 8192,
+    },
   },
   /*dsp: {
     args: ["INPUT_FILE", "OUTPUT_FILE"],

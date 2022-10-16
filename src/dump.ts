@@ -41,7 +41,7 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
   return {status: 'ok'}
 }
 
-/** Get the voltage sample data for a specified source ID.
+/** Get the voltage sample data for a specified line number.
  * 
  * Not implemented yet:
  * If the `includeMargin` option is set, all of the samples including the
@@ -52,11 +52,7 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
  * samples at the beginning or end of the extracted stream, where N is the
  * whole-sample delay. This is 
  */
-async function extract_source(sourceId: number, includeMargin: boolean, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<ArrayBuffer>> {
-  const getLineResult = await source_to_line(sourceId, file, meta, cache)
-  if(getLineResult.status != 'ok')
-    return fail(getLineResult.reason)
-  const lineNum = getLineResult.value
+export async function extract_source(lineNum: number, includeMargin: boolean, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<ArrayBuffer>> {
   const bufSize = includeMargin ? meta.samples_per_line * meta.blocks_per_sub * 2 + meta.margin_samples*2 // 2 bytes each for half the margin samples per end * 2 ends
                                 : meta.samples_per_line * meta.blocks_per_sub * 2
   const buf = new Int8Array(bufSize)
