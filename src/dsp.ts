@@ -39,7 +39,7 @@ function apply_block_transform(fn: BlockTransform, size: number, idata: Int8Arra
     const oblock = odata.subarray(i*size*2, (i+1)*size*2)
     fn(iblock, oblock, i)
   }
-  throw "bang"
+  //throw "bang"
 }
 
 function make_band_pass_filter(fmin: number, fmax: number, bandwidth: number, fftsize: number): BlockTransform {
@@ -85,7 +85,7 @@ function make_frac_delay_filter(delays: Int32Array, centre: number, stream_len: 
     const microsampleDelay = delays[delayIdx]
     const delay = microsampleDelay/1000000 / sample_rate
     const dcOffset = centre * (delay + timeOffset) * Math.PI * 2
-    console.log(microsampleDelay, timeOffset, delay, dcOffset)
+    //console.log(microsampleDelay, timeOffset, delay, dcOffset)
     fft.transform(istorage, idata)
  
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {

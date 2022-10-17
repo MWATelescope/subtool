@@ -469,6 +469,7 @@ async function runPatch(pfname: string, sfname: string, opts): Promise<Result<vo
   if(writeResult.status != 'ok')
     return fail(writeResult.reason)
 
+  console.warn(`Patched delay table in ${sfname} at 0x${meta.dt_offset.toString(16)} (${meta.dt_length} bytes).`)
   return ok()
 }
 
