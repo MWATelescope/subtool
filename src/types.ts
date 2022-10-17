@@ -7,6 +7,7 @@ export type Metadata = {
   subobservation_id: number;  // (sub) subobservation id
   num_sources: number;        // (ALL) number of sources that appear in the file
   num_frac_delays: number;    // (ALL) number of fractional delays used in the delay table
+  frac_delay_size: number;    // (ALL) bytes used for fractional delays (2 or 4)
   sample_rate: number;        // (sub) sample rate for subobservation
   secs_per_subobs: number;    // (sub) length of subobservation in seconds
   samples_per_line: number;   // (sub) samples per line in each data block
@@ -79,10 +80,22 @@ export type DelayTableEntry = {
   delta_delay: number;
   delta_delta_delay: number; 
   num_pointings: number;
-  frac_delay: Int16Array;
+  frac_delay: Int32Array;
 }
 
 export type DelayTable = DelayTableEntry[]
+
+export type HPDelayTableEntry = {
+  rf_input: number;
+  ws_delay: number;
+  initial_delay: number;
+  delta_delay: number;
+  delta_delta_delay: number; 
+  num_pointings: number;
+  frac_delay: Int32Array;
+}
+
+export type HPDelayTable = HPDelayTableEntry[]
 
 export type SourceMap = {
   [k: number]: number;

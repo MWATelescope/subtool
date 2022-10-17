@@ -66,14 +66,14 @@
 import * as fs from 'node:fs/promises'
 import { FileHandle } from 'fs/promises'
 import * as dt from './dt.js'
-import { read_header } from './header.js'
-import { fail, init_metadata, ok } from './util.js'
+import { read_header, serialise_header, set_header_value } from './header.js'
+import { await_all, fail, init_metadata, ok } from './util.js'
 import * as rp from './repoint.js'
 import * as rs from './resample.js'
 import type { DelayTable, Metadata, OutputDescriptor, Result, SourceMap } from './types'
 import type { Cache } from './cache'
 import {cache_create} from './cache.js'
-import {read_block} from './reader.js'
+import {read_block, read_section} from './reader.js'
 import {read_delay_table} from './dt.js'
 
 /** Load a subfile, gather basic info. */
@@ -96,7 +96,7 @@ export async function load_subfile(filename: string, mode='r', cache: Cache = nu
   meta.fft_per_block = 10
   meta.margin_packets = 2
   meta.samples_per_packet = 2048
-  
+
   const headerResult: any = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
@@ -109,6 +109,8 @@ export async function load_subfile(filename: string, mode='r', cache: Cache = nu
   meta.subobservation_id = header.SUBOBS_ID
   meta.samples_per_line = header.NTIMESAMPLES
   meta.margin_samples = header.MARGIN_SAMPLES ?? meta.margin_packets * meta.samples_per_packet
+  meta.frac_delay_size = header.FRAC_DELAY_SIZE ?? 2
+  const dt_row_pad = meta.frac_delay_size == 2 ? 2 : 0 // FIXME: hack
 
   meta.blocks_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_line
   meta.blocks_per_sec = meta.blocks_per_sub / meta.secs_per_subobs
@@ -116,7 +118,7 @@ export async function load_subfile(filename: string, mode='r', cache: Cache = nu
   meta.num_frac_delays = meta.blocks_per_sub * meta.fft_per_block
   meta.udp_per_rf_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_packet
   meta.udp_payload_length = meta.samples_per_packet * 2
-  meta.dt_length = meta.num_sources * (20 + meta.num_frac_delays*2)
+  meta.dt_length = meta.num_sources * (18 + dt_row_pad + meta.num_frac_delays*meta.frac_delay_size)
   meta.block_length = meta.sub_line_size * meta.num_sources
   meta.data_present = true
   meta.data_offset = meta.header_length + meta.block_length
@@ -246,9 +248,57 @@ export async function overwrite_line(lineNum: number, blockNum: number, samples:
 
 /** Overwrite the delay table. */
 export async function overwrite_delay_table(table: DelayTable, meta: Metadata, file: FileHandle): Promise<Result<void>> {
-  const buf = dt.serialise_delay_table(table, meta.num_sources, meta.num_frac_delays)
+  const buf = dt.serialise_delay_table(table, meta.num_sources, meta.num_frac_delays, meta.frac_delay_size)
   const position = meta.dt_offset
   const length = meta.dt_length
   await file.write(Buffer.from(buf), 0, length, position)
+  return ok()
+}
+
+/** Overwrite an arbitrary section. */
+export async function overwrite_section(name: string, buf: ArrayBuffer, meta: Metadata, file: FileHandle): Promise<Result<void>> {
+  const isPresent = meta[`${name}_present`]
+  const length = meta[`${name}_length`]
+  const position = meta[`${name}_offset`]
+  if(!isPresent)
+    return fail(`Cannot write section '${name}' when not indicated in metadata.`)
+
+  await file.write(Buffer.from(buf), 0, length, position)
+  return ok()
+}
+
+/** Change the size of the delay table fractional delays from 2 to 4 bytes. */
+export async function upgrade_delay_table(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<void>> {
+  if(meta.frac_delay_size == 4) {
+    console.warn(`Nothing to do. This subfile already uses 4-byte fractional delays.`)
+    return ok()
+  }
+  const result = await await_all([
+    read_section('udpmap', file, meta, cache),
+    read_section('margin', file, meta, cache),
+  ])
+  const [udpmap, margin] = result.value
+  meta.frac_delay_size = 4
+  const new_dt_length = meta.num_sources * (18 + meta.num_frac_delays*4)
+  const dt_length_diff = new_dt_length - meta.dt_length
+  meta.dt_length = new_dt_length
+  meta.udpmap_offset += dt_length_diff
+  meta.margin_offset += dt_length_diff
+  await overwrite_section('udpmap', udpmap, meta, file)
+  await overwrite_section('margin', margin, meta, file)
+  await overwrite_delay_table(meta.delay_table, meta, file)
+
+  const headerResult = await read_header(file, meta, cache)
+  if(headerResult.status != 'ok')
+    return headerResult
+  const header = headerResult.value
+  const setResult = set_header_value('FRAC_DELAY_SIZE', 4, header, true)
+  if(setResult.status != 'ok')
+    return fail(setResult.reason)
+  const headerBuf = serialise_header(header, meta)
+  const writeResult = await overwrite_section('header', headerBuf, meta, file)
+  if(writeResult.status != 'ok')
+    return writeResult
+  
   return ok()
 }

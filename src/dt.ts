@@ -16,7 +16,8 @@ export function parse_delay_table_binary(buf: ArrayBuffer, meta: Metadata, byteO
   //  return {status: 'err', reason: `Internal error: Can't parse binary delay table before dimensions have been determined. ${meta.num_sources} ${meta.num_frac_delays}  ` }
 
   let table = []
-  const rowLen = 20 + 2*meta.num_frac_delays
+  const dtpad = meta.frac_delay_size == 2 ? 2 : 0 // FIXME: hack
+  const rowLen = 18 + dtpad + meta.frac_delay_size*meta.num_frac_delays
   for(let i=0; i<meta.num_sources; i++) {
     const view = new DataView(buf, i * rowLen + byteOffset, rowLen)
     const row = parse_delay_table_row(view, meta)
@@ -27,6 +28,10 @@ export function parse_delay_table_binary(buf: ArrayBuffer, meta: Metadata, byteO
 }
 
 export function parse_delay_table_row(view: DataView, meta: Metadata): DelayTableEntry {
+  const parseFrac = meta.frac_delay_size == 4 ? i => view.getInt32(18+4*i, true)
+                  : meta.frac_delay_size == 2 ? i => 1000 * view.getInt16(18+2*i, true)
+                  : _ => { throw `Unsupported frac delay size ${meta.frac_delay_size}.` }
+
   return {
     rf_input: view.getUint16(0, true),
     ws_delay: view.getInt16(2, true),
@@ -34,12 +39,15 @@ export function parse_delay_table_row(view: DataView, meta: Metadata): DelayTabl
     delta_delay: view.getInt32(8, true),
     delta_delta_delay: view.getInt32(12, true),
     num_pointings: view.getInt16(16, true),
-    frac_delay: new Int16Array(meta.num_frac_delays).map((_,i) => view.getInt16(18+2*i, true))
+    frac_delay: new Int32Array(meta.num_frac_delays).map((_,i) => parseFrac(i))
   }
 }
 
-export function parse_delay_table_csv(csv) {
-  return csv.trim().split('\n').map(line => { 
+export function parse_delay_table_csv(csv: string, frac_delay_size: number): Result<DelayTable> {
+  if(frac_delay_size == null)
+    console.warn(`Reading CSV delay table with unknown fractional delay precision. Will guess from values.`)
+
+  const table = csv.trim().split('\n').map(line => { 
     const [ 
       rf_input, 
       ws_delay, 
@@ -48,15 +56,29 @@ export function parse_delay_table_csv(csv) {
       delta_delta_delay, 
       num_pointings,
       ...frac_delay] = line.split(',').map(x => Number.parseInt(x))
-    return { rf_input, ws_delay, initial_delay, delta_delay, delta_delta_delay, num_pointings, frac_delay }
+    return { rf_input, ws_delay, initial_delay, delta_delay, delta_delta_delay, num_pointings, 
+      frac_delay: Int32Array.from(frac_delay) }
   })
+
+  const allUnder2k = table.every(row => row.frac_delay.every(x => Math.abs(x) < 2000))
+  if(allUnder2k) {
+    console.warn(`Detected CSV file with absolute values for all fractional delays less than 2000. Assuming millisamples.`)
+    for(let row of table)
+      row.frac_delay = row.frac_delay.map(x => x * 1000)
+  } else {
+    console.warn(`Detected CSV file with absolute values for fractional delays exceeding 2000. Assuming microsamples.`)
+  }
+
+  return ok(table)
 }
 
 /*
  *    OUTPUT FORMATTING
  */
 
-export function print_delay_table(tiles, delayTableBuf, opts, meta) {
+export function print_delay_table(tiles: DelayTable, delayTableBuf: ArrayBuffer, opts, meta: Metadata): void {
+  const scaleFrac = meta.frac_delay_size == 2 ? x => x / 1000
+                  : x => x // FIXME: hack
   if(opts.format_out == 'pretty') {
     if(opts.selected_sources != null)
       tiles = tiles.filter(x => opts.selected_sources.indexOf(x.rf_input) != -1)
@@ -72,7 +94,7 @@ export function print_delay_table(tiles, delayTableBuf, opts, meta) {
         pad(5, tile.delta_delay),
         tile.delta_delta_delay,
         tile.num_pointings,
-        tile.frac_delay.slice(0,num_frac_delays).toString(),
+        tile.frac_delay.slice(0,num_frac_delays).map(scaleFrac).toString(),
         ].join(' ') + (num_frac_delays >= tile.frac_delay.length ? '' : '...')
       )
     } 
@@ -88,7 +110,7 @@ export function print_delay_table(tiles, delayTableBuf, opts, meta) {
           tile.delta_delay,
           tile.delta_delta_delay,
           tile.num_pointings,
-          tile.frac_delay.slice(0,num_frac_delays).join(','),
+          tile.frac_delay.slice(0,num_frac_delays).map(scaleFrac).join(','),
           ].join(',')
         )
     }
@@ -105,7 +127,7 @@ export function print_delay_table(tiles, delayTableBuf, opts, meta) {
         console.warn("Warning: binary output with selection constraints requires the table to be reconstructed with different dimensions and is likely to be incompatible with the original subfile.")
       if(opts.selected_sources != null)
         tiles = tiles.filter(x => opts.selected_sources.indexOf(x.rf_input) != -1)
-      const buf = serialise_delay_table(tiles, tiles.length, num_frac_delays)
+      const buf = serialise_delay_table(tiles, tiles.length, num_frac_delays, meta.frac_delay_size)
       process.stdout.write(Buffer.from(buf))
     }
   } else {
@@ -113,16 +135,19 @@ export function print_delay_table(tiles, delayTableBuf, opts, meta) {
   }
 }
 
-export function serialise_delay_table(table, num_sources, num_fracs) {
+export function serialise_delay_table(table: DelayTable, num_sources: number, num_fracs: number, frac_size: number): ArrayBuffer {
   if(table.length != num_sources)
     console.warn(`WARNING: Creating binary delay table with ${num_sources} sources, but ${table.length} sources were provided.`)
   if(!table.reduce((acc, x) => acc && x.frac_delay.length == table[0].frac_delay.length, true))
     throw 'Invalid delay table: fractional delays length mismatch detected'
   if(table.length > 1 && table[0].frac_delay.length != num_fracs)
     console.warn(`WARNING: Creating binary delay table with ${num_fracs} fractional delays, but the provided table has ${table[0].frac_delay.length} fractional delays.`)
-
-  const rowLen = 20 + 2*num_fracs
+  const dtpad = frac_size == 2 ? 2 : 0
+  const rowLen = 18 + dtpad + frac_size*num_fracs
   const buf = new ArrayBuffer(num_sources * rowLen)
+  const setFrac = frac_size == 2 ? (view, x, j) => view.setInt16(18 + j*2, x/1000, true)
+                : frac_size == 4 ? (view, x, j) => view.setInt32(18 + j*4, x, true)
+                : (view, x, j) => { throw `Invalid frac delay size ${frac_size}.` }
   table.slice(0, num_sources).forEach((tile, i) => {
     const view = new DataView(buf, i * rowLen, rowLen)
     view.setUint16(0, tile.rf_input          , true)
@@ -131,7 +156,7 @@ export function serialise_delay_table(table, num_sources, num_fracs) {
     view.setInt32(8,  tile.delta_delay       , true)
     view.setInt32(12, tile.delta_delta_delay , true)
     view.setInt16(16, tile.num_pointings     , true)
-    tile.frac_delay.slice(0, num_fracs).forEach((x, j) => view.setInt16(18 + j*2, x, true))
+    tile.frac_delay.slice(0, num_fracs).forEach((x,j) => setFrac(view, x, j))
   })
   return buf
 }
@@ -157,7 +182,10 @@ export async function read_delay_table(file: FileHandle, meta: Metadata, cache: 
 /** Load a delay table from a CSV file. */
 export async function load_delay_table_csv(filename: string, opts, meta: Metadata): Promise<Result<DelayTable>> {
   const csv = await fs.readFile(filename, 'utf8')
-  const table = parse_delay_table_csv(csv)
+  const parseResult = parse_delay_table_csv(csv, meta.frac_delay_size)
+  if(parseResult.status != 'ok')
+    return fail(parseResult.reason)
+  const table = parseResult.value
   const num_sources = table.length
   const num_frac_delays = table[0].frac_delay.length
   
@@ -186,12 +214,14 @@ type LoadDelayTableBinaryResult = {
 }
 
 export async function load_delay_table_binary(filename: string, opts, meta: Metadata): Promise<Result<LoadDelayTableBinaryResult>> {
+  if(meta.frac_delay_size == null)
+    return fail(`Internal error: frac delay size must be known before loading binary delay table.`)
+  const dtpad = meta.frac_delay_size == 2 ? 2 : 0
   const buf = await fs.readFile(filename)
-
   // First, figure out if we already have enough information to determine the shape and try to fill
   // in missing details.
   if(meta.num_sources == null && meta.num_frac_delays != null) {
-    const impliedRowLen = 20 + 2*meta.num_frac_delays
+    const impliedRowLen = 18 + dtpad + meta.frac_delay_size*meta.num_frac_delays
     const impliedRowCount = buf.byteLength / impliedRowLen
 
     if(buf.byteLength % impliedRowCount != 0) 
@@ -203,11 +233,11 @@ export async function load_delay_table_binary(filename: string, opts, meta: Meta
       return fail(`Number of sources ${meta.num_sources} is inconsistent with binary delay table size ${buf.byteLength}.`)
 
     const impliedRowLen = buf.byteLength / meta.num_sources
-    const impliedFracDelays = (impliedRowLen - 20) / 2
+    const impliedFracDelays = (impliedRowLen - 18 - dtpad) / meta.frac_delay_size
     meta.num_frac_delays = impliedFracDelays
   } else {
     console.warn(`Attempting to load binary delay table with unspecified dimensions. If known, dimensions may be specified with --num-sources and --num-frac-delays.`)
-    const result = detect_delay_table_shape_binary(buf.buffer, filename)
+    const result = detect_delay_table_shape_binary(buf.buffer, filename, meta.frac_delay_size)
     if(result.status != 'ok')
       return fail(result.reason)
     meta.num_sources = result.num_sources
@@ -272,24 +302,29 @@ export async function load_delay_table(filename: string, opts, meta: Metadata): 
 /** Detect the number of sources and fractional delays of a binary delay table, given an ArrayBuffer. 
  * Returns a status object.
  */
-export function detect_delay_table_shape_binary(buf, filename) {
+export function detect_delay_table_shape_binary(buf: ArrayBuffer, filename: string, frac_size: number) {
   if(buf.byteLength < 20)
     return {status: 'err', reason: `File is too small to be a valid binary delay table: ${filename}`}
 
+  const pad = frac_size == 2 ? 2 : 0 // FIXME: hack
+
   /** Check if a candidate number of fractional delays is plausible. */
   function isViable(nFracs) {
-    const impliedRowLen = 20 + 2*nFracs
+    const impliedRowLen = 18 + pad + frac_size*nFracs
     const impliedRowCount = buf.byteLength / impliedRowLen
 
     // Test 1: The implied row length must divide the file evenly.
     if(buf.byteLength % impliedRowLen != 0)
       return false
-
+    const getFrac = frac_size == 2 ? (view, n) => view.getInt16(18 + n*2, true)
+                  : frac_size == 4 ? (view, n) => view.getInt32(18 + n*4, true)
+                  : (view, n) => { throw `Unsupported fractional delay size ${frac_size}.` }
     const maybeSourceIds = []    
     for(let i=0; i<impliedRowCount; i++) {
       const view = new DataView(buf, i*impliedRowLen, impliedRowLen)
-      const maybeFirstFrac = view.getInt16(18, true)
-      const maybeLastFrac = view.getInt16(impliedRowLen-4, true)
+      
+      const maybeFirstFrac = getFrac(view, 0)
+      const maybeLastFrac = getFrac(view, nFracs-1)
       const maybeOverallSign = Math.sign(maybeLastFrac - maybeFirstFrac)
 
       // Test 2: For now, `num_pointings` must always be 1.
@@ -305,7 +340,7 @@ export function detect_delay_table_shape_binary(buf, filename) {
         maybeSourceIds.push(maybeSourceId)
 
       for(let j=0; j<nFracs; j++) {
-        const maybeFrac = view.getInt16(18 + j*2, true)
+        const maybeFrac = getFrac(view, j)
 
         // Test 4: Fractional delays must be in the range [-2000,2000]
         if(maybeFrac < -2000 || maybeFrac > 2000)
@@ -313,7 +348,7 @@ export function detect_delay_table_shape_binary(buf, filename) {
 
         // Test 5: Fractional delays must increment monotonically
         if(j > 0) {
-          const maybeLastFrac = view.getInt16(18 + (j-1)*2, true)
+          const maybeLastFrac = getFrac(view, j-1)
           const maybeSign = Math.sign(maybeFrac - maybeLastFrac)
           if(maybeSign != 0 && maybeSign != maybeOverallSign)
             return false
@@ -322,7 +357,7 @@ export function detect_delay_table_shape_binary(buf, filename) {
     }
     return true
   }
-  const maxPossibleFracs = (buf.byteLength - 20) / 2
+  const maxPossibleFracs = (buf.byteLength - 18 - pad) / frac_size
   let numFracs = 0
   let foundPlausibleValue = false
   while(numFracs < maxPossibleFracs) {
@@ -335,7 +370,7 @@ export function detect_delay_table_shape_binary(buf, filename) {
   if(!foundPlausibleValue)
     return {status: 'err', reason: 'Unable to determine shape of binary delay table.'}
   
-  const rowLen = 20 + 2*numFracs
+  const rowLen = 18 + pad + frac_size*numFracs
   const rowCount = buf.byteLength / rowLen
   console.warn(`Detected ${rowCount} sources and ${numFracs} fractional delays.`)
   return {status: 'ok', num_sources: rowCount, num_frac_delays: numFracs}

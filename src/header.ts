@@ -48,6 +48,7 @@ const HEADER_FIELDS = {
   MC_PORT:             { index: 30, type: 'number' },
   MC_SRC_IP:           { index: 31, type: 'string' },
   MWAX_U2S_VER:        { index: 32, type: 'string' },
+  FRAC_DELAY_SIZE:     { index: 33, type: 'number' },
 }
 
 export function print_header(header, headerBuf: ArrayBuffer, opts) {

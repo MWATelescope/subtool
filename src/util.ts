@@ -10,6 +10,7 @@ export function init_metadata(): Metadata {
     subobservation_id: null, 
     num_sources: null,       
     num_frac_delays: null,   
+    frac_delay_size: null,
     sample_rate: null,       
     secs_per_subobs: null,   
     samples_per_line: null,  
@@ -105,14 +106,15 @@ export async function write_section(name: string, buffer: ArrayBuffer, file: Fil
 }
 
 /** Get the results for a list of action Promises. */
-export async function await_all(tasks) {
+export async function await_all<T>(tasks: Promise<Result<T>>[]): Promise<Result<T[]>> {
   const values = []
   for(let task of tasks) {
     const result = await task
-    if(result.status != 'ok') return result
+    if(result.status != 'ok')
+      return fail(result.reason)
     values.push(result.value)
   }
-  return {status: 'ok', value: values}
+  return ok(values)
 }
 
 export function all<T>(results: Result<T>[]): Result<T[]> {

@@ -4,8 +4,8 @@ import {TransformSpec, Result} from "./types"
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
 Available commands:
-  info, get, set, unset, show, dt, dump, 
-  repoint, replace, resample, bake, patch
+  info, get, set, unset, show, dt, dump, bake
+  repoint, replace, resample, patch, upgrade
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -143,6 +143,12 @@ Overwrite a section of a subfile with data loaded from a file.
                             data     Entire sample data section.
                             preamble Header + block 0.
 
+UPGRADE COMMAND (upgrade)
+Upgrade a subfile to use microsample fractional delays.
+
+      subtool upgrade <FILE>
+  
+  FILE                    Path to subfile.
 `
 /*
 SIGNAL PROCESSOR COMMAND (dsp)
@@ -399,6 +405,13 @@ const schema = {
     },
     defaults: {
       patch_section: null,
+    },
+  },
+  upgrade: {
+    args: ["FILE"],
+    opts: {
+    },
+    defaults: {
     },
   },
   /*dsp: {

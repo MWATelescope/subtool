@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import { parse_command_line } from './cli.js'
 import * as dt from './dt.js'
 import * as dump from './dump.js'
-import { load_subfile, overwrite_delay_table, overwrite_samples, write_subfile } from './subfile.js'
+import { load_subfile, overwrite_delay_table, overwrite_samples, upgrade_delay_table, write_subfile } from './subfile.js'
 import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
 import { read_section, init_metadata, write_section, ok, fail } from './util.js'
 import type { Metadata, OutputDescriptor, Result, SourceMap, TransformerSet, TransformSpec } from './types'
@@ -44,6 +44,8 @@ async function main(args: string[]) {
     return runBake(parseResult.fixedArgs[0], parseResult.opts)
   case 'patch':
     return runPatch(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
+  case 'upgrade':
+    return runUpgrade(parseResult.fixedArgs[0], parseResult.opts)
   case null:
     return ok()
   default:
@@ -58,10 +60,10 @@ async function runGet(key: string, filename: string, opts) {
   if(loadResult.status != 'ok')
     return loadResult
   const {meta, file, cache} = loadResult
-  const headerResult: any = await read_header(file, meta, cache)
+  const headerResult = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
-  const header = headerResult.header
+  const header = headerResult.value
   if(key in header)
     console.log(header[key])
   else
@@ -76,11 +78,11 @@ async function runSet(key: string, value: string, filename: string, opts) {
   if(loadResult.status != 'ok')
     return loadResult
   const {meta, file, cache} = loadResult
-  const headerResult: any = await read_header(file, meta, cache)
+  const headerResult = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
 
-  const header = headerResult.header
+  const header = headerResult.value
   const setResult = set_header_value(key, value, header, opts.set_force)
   if(setResult.status != 'ok')
     return setResult
@@ -99,11 +101,11 @@ async function runUnset(key: string, filename: string, opts) {
   if(loadResult.status != 'ok')
     return loadResult
   const {meta, file, cache} = loadResult
-  const headerResult: any = await read_header(file, meta, cache)
+  const headerResult = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
 
-  const header = headerResult.header
+  const header = headerResult.value
   if(!(key in header || opts.unset_force)) {
     await file.close()
     return fail(`No such key ${key}.`)
@@ -145,21 +147,21 @@ async function runShow(filename: string, opts) {
 
   // Read tile metadata
   console.log('')
-  const delayTableLength = 20 + 2 * 1600
-  const delayTablePad = 0 // 4 - delayTableLength % 4
-  const delayTableSectionLength = (delayTableLength + delayTablePad) * header.NINPUTS
-  const delayTableBuf = new ArrayBuffer(delayTableSectionLength)
-  result = await file.read(new Uint8Array(delayTableBuf), 0, delayTableSectionLength)
-  if(result.bytesRead != delayTableSectionLength)
-    throw `Failed to read header data. Expected to read ${delayTableSectionLength} bytes, got ${result.bytesRead}`
-  const tiles = []
-  for(let i=0; i<header.NINPUTS; i++) {
-    const view = new DataView(delayTableBuf, i*(delayTableLength+delayTablePad), delayTableLength)
-    const tile = dt.parse_delay_table_row(view, meta)
-    tiles.push(tile)
-  }
+  //const delayTableLength = 20 + 2 * 1600
+  //const delayTablePad = 0 // 4 - delayTableLength % 4
+  //const delayTableSectionLength = (delayTableLength + delayTablePad) * header.NINPUTS
+  //const delayTableBuf = new ArrayBuffer(delayTableSectionLength)
+  //result = await file.read(new Uint8Array(delayTableBuf), 0, delayTableSectionLength)
+  //if(result.bytesRead != delayTableSectionLength)
+  //  throw `Failed to read header data. Expected to read ${delayTableSectionLength} bytes, got ${result.bytesRead}`
+  const tiles = meta.delay_table
+  //for(let i=0; i<header.NINPUTS; i++) {
+  //  const view = new DataView(delayTableBuf, i*(delayTableLength+delayTablePad), delayTableLength)
+  //  const tile = dt.parse_delay_table_row(view, meta)
+  //  tiles.push(tile)
+  //}
   if(opts.show_delay_table)
-    dt.print_delay_table(tiles, delayTableBuf, opts, meta)
+    dt.print_delay_table(tiles, null, opts, meta)
   
 
   // Read voltages
@@ -282,7 +284,7 @@ async function runRepoint(infilename, outfilename, opts) {
   }
   const origDt = origDtResult.value
   const newDt = loadDtResult.value
-  const newDtBin = dt.serialise_delay_table(newDt, meta.num_sources, meta.num_frac_delays)
+  const newDtBin = dt.serialise_delay_table(newDt, meta.num_sources, meta.num_frac_delays, meta.frac_delay_size)
 
   const outputMeta = { ...meta, filename: outfilename}
   const outputDescriptor = {
@@ -467,6 +469,19 @@ async function runPatch(pfname: string, sfname: string, opts): Promise<Result<vo
   if(writeResult.status != 'ok')
     return fail(writeResult.reason)
 
+  return ok()
+}
+
+async function runUpgrade(fname: string, opts): Promise<Result<void>> {
+  const loadResult = await load_subfile(fname, 'r+')
+  if(loadResult.status != 'ok')
+    return fail(loadResult.reason)
+  const {file, cache} = loadResult
+  const meta: Metadata = loadResult.meta
+  const result = await upgrade_delay_table(file, meta, cache)
+  if(result.status != 'ok')
+    return fail(result.reason)
+  console.warn(`Upgraded fractional delay precision for ${fname}.`)
   return ok()
 }
 

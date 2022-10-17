@@ -6,7 +6,8 @@
 subtool <COMMAND> [opts] [FILE]
 
 Available commands:
-  info, get, set, unset, show, dt, dump, repoint, replace, resample
+  info, get, set, unset, show, dt, dump, bake
+  repoint, replace, resample, patch, upgrade
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -106,6 +107,7 @@ Write binary contents of a subfile section to a file.
                             preamble Header + block 0.
   --block=N               Extract the Nth block (sample data starts at N=1).
   --source=ID             Extract all the samples from a given source ID.
+  --with-margin           When extracting samples, include margin data.
 
 RESAMPLE COMMAND (replace)
 Write a new subfile, resampling voltage data from specified sources with
@@ -115,14 +117,40 @@ varying phase delays.
 
   INPUT_FILE              Path to input subfile.
   OUTPUT_FILE             Path to write output subfile.
-  --phase=A[,B...]        Phase specifiers (see note below).
+  --rules=A[,B...]        Transform rule specifier list.
+  --region=N              Transform with N surrounding samples.
 
-Phase specifiers describe the phase shift for a specified source. The phase
-shift has a start and end value in millisamples:
+BAKE-IN DELAYS COMMAND (bake)
+Apply fractional delays to the voltage data in a subfile and reset the delay
+table values to zero. Operates in-place.
 
-    <source>:<start>:<end>
+      subtool bake <FILE>
 
-Voltages are resampled with linear interpolation.
+  FILE                    Path to subfile.    
+  --source=A[,B...]       Process only the specified RF sources.
+  --fft-size=SIZE         Number of points in FFT (default: 8192).
+
+PATCH COMMAND (patch)
+Overwrite a section of a subfile with data loaded from a file.
+
+      subtool patch [patch_opts] <PATCH> <SUBFILE>
+
+  PATCH                   Path to replacement data.
+  SUBFILE                 Path to subfile.
+  --section=SECTION       Section to replace:
+                            header   Subfile header.
+                            dt       Delay table.
+                            udpmap   UDP packet map.
+                            margin   Margin data.
+                            data     Entire sample data section.
+                            preamble Header + block 0.
+
+UPGRADE COMMAND (upgrade)
+Upgrade a subfile to use microsample fractional delays.
+
+      subtool upgrade <FILE>
+  
+  FILE                    Path to subfile.
 ```
 
 ## INSTALL

@@ -22,7 +22,7 @@ export async function runDsp(rule: string, ifname: string, ofname: string): Prom
   return ok()
 }
 
-export function bake_delays(delays: Int16Array, fftsize: number, idata: Int8Array, odata: Int8Array, meta: Metadata): Result<void> {
+export function bake_delays(delays: Int32Array, fftsize: number, idata: Int8Array, odata: Int8Array, meta: Metadata): Result<void> {
   const sample_rate = meta.sample_rate
   const filter = make_frac_delay_filter(delays, 157000000, sample_rate*8, fftsize, sample_rate)
   apply_block_transform(filter, fftsize, idata, odata)
@@ -39,7 +39,7 @@ function apply_block_transform(fn: BlockTransform, size: number, idata: Int8Arra
     const oblock = odata.subarray(i*size*2, (i+1)*size*2)
     fn(iblock, oblock, i)
   }
-  //throw "bang"
+  throw "bang"
 }
 
 function make_band_pass_filter(fmin: number, fmax: number, bandwidth: number, fftsize: number): BlockTransform {
@@ -69,7 +69,7 @@ function make_band_pass_filter(fmin: number, fmax: number, bandwidth: number, ff
  * fft_size:    Number of points in FFT.
  * sample_rate: Samples per second.
  */
-function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: number, fft_size: number, sample_rate: number): BlockTransform {
+function make_frac_delay_filter(delays: Int32Array, centre: number, stream_len: number, fft_size: number, sample_rate: number): BlockTransform {
   const fft = new FFT(fft_size)
   const istorage = fft.createComplexArray()
   const ostorage = fft.createComplexArray()
@@ -81,11 +81,11 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
     const middleSample = blockIdx * fft_size + fft_size / 2
     const delayIdx = Math.floor(delays.length * middleSample / stream_len)
     //console.log(delayIdx)
-    const timeOffset = middleSample / sample_rate
-    const millisampleDelay = delays[delayIdx]
-    const delay = millisampleDelay/1000 / sample_rate
+    const timeOffset = 0 // middleSample / sample_rate
+    const microsampleDelay = delays[delayIdx]
+    const delay = microsampleDelay/1000000 / sample_rate
     const dcOffset = centre * (delay + timeOffset) * Math.PI * 2
-    //console.log(millisampleDelay, delay, dcOffset)
+    console.log(microsampleDelay, timeOffset, delay, dcOffset)
     fft.transform(istorage, idata)
  
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {
