@@ -90,7 +90,7 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {
       const freq = sampleIdx / (fft_size * fft_len)
       const fineOffset = freq * delay * Math.PI * 2
-      const offset = dcOffset - fineOffset
+      const offset = dcOffset + fineOffset
       const oldSample: Z = [istorage[sampleIdx*2], istorage[sampleIdx*2+1]]
       const newSample = complex_rotate(-offset, oldSample)
       istorage[sampleIdx*2] = newSample[0]
