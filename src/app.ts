@@ -275,12 +275,12 @@ async function runRepoint(infilename, outfilename, opts) {
     console.error(loadDtResult.reason)
     return
   }
-  const origDtResult: any = dt.parse_delay_table_binary(dtResult.buf, meta)
+  const origDtResult = dt.parse_delay_table_binary(dtResult.buf, meta)
   if(origDtResult.status != 'ok') {
     console.error(origDtResult.reason)
     return
   }
-  const origDt = origDtResult.table
+  const origDt = origDtResult.value
   const newDt = loadDtResult.value
   const newDtBin = dt.serialise_delay_table(newDt, meta.num_sources, meta.num_frac_delays)
 
