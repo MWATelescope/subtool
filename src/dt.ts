@@ -11,7 +11,7 @@ import {Cache} from './cache.js'
  *    PARSING
  */
 
-export function parse_delay_table_binary(buf: ArrayBuffer, meta: Metadata, byteOffset=0) {
+export function parse_delay_table_binary(buf: ArrayBuffer, meta: Metadata, byteOffset=0): Result<DelayTable> {
   //if(!Number.isInteger(meta.num_sources) || !Number.isInteger(meta.num_frac_delays))
   //  return {status: 'err', reason: `Internal error: Can't parse binary delay table before dimensions have been determined. ${meta.num_sources} ${meta.num_frac_delays}  ` }
 
@@ -23,11 +23,11 @@ export function parse_delay_table_binary(buf: ArrayBuffer, meta: Metadata, byteO
     table.push(row)
   }
 
-  return {status: 'ok', table}
+  return ok(table)
 }
 
-export function parse_delay_table_row(view: DataView, meta: Metadata) {
-  const tile: DelayTableEntry = {
+export function parse_delay_table_row(view: DataView, meta: Metadata): DelayTableEntry {
+  return {
     rf_input: view.getUint16(0, true),
     ws_delay: view.getInt16(2, true),
     initial_delay: view.getInt32(4, true),
@@ -36,7 +36,6 @@ export function parse_delay_table_row(view: DataView, meta: Metadata) {
     num_pointings: view.getInt16(16, true),
     frac_delay: new Int16Array(meta.num_frac_delays).map((_,i) => view.getInt16(18+2*i, true))
   }
-  return tile
 }
 
 export function parse_delay_table_csv(csv) {
@@ -148,29 +147,28 @@ export async function read_delay_table(file: FileHandle, meta: Metadata, cache: 
   if(sectionResult.status != 'ok')
     return fail(sectionResult.reason)
 
-  const parseResult: any = parse_delay_table_binary(sectionResult.value, meta)
+  const parseResult = parse_delay_table_binary(sectionResult.value, meta)
   if(parseResult.status != 'ok')
     return fail(parseResult.reason)
 
-  return ok(parseResult.table)
+  return ok(parseResult.value)
 }
 
 /** Load a delay table from a CSV file. */
-export async function load_delay_table_csv(filename, opts, meta) {
+export async function load_delay_table_csv(filename: string, opts, meta: Metadata): Promise<Result<DelayTable>> {
   const csv = await fs.readFile(filename, 'utf8')
   const table = parse_delay_table_csv(csv)
   const num_sources = table.length
   const num_frac_delays = table[0].frac_delay.length
   
-
   if(Number.isInteger(meta.num_frac_delays) && meta.num_frac_delays != num_frac_delays)
-    return {status: 'err', reason: `Expected number of fractional delays from metadata (${meta.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`}
+    return fail(`Expected number of fractional delays from metadata (${meta.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`)
   if(Number.isInteger(meta.num_sources) && meta.num_sources != num_sources)
-    return {status: 'err', reason: `Expected number of sources from metadata (${meta.num_sources}) inconsistent with number found in file (${num_sources}).`}
+    return fail(`Expected number of sources from metadata (${meta.num_sources}) inconsistent with number found in file (${num_sources}).`)
   if(Number.isInteger(opts.num_frac_delays) && opts.num_frac_delays != num_frac_delays)
-    return {status: 'err', reason: `Expected number of fractional delays from options (${opts.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`}
+    return fail(`Expected number of fractional delays from options (${opts.num_frac_delays}) inconsistent with number found in file (${num_frac_delays}).`)
   if(Number.isInteger(opts.num_sources) && opts.num_sources != num_sources)
-    return {status: 'err', reason: `Expected number of sources from options (${opts.num_sources}) inconsistent with number found in file (${num_sources}).`}
+    return fail(`Expected number of sources from options (${opts.num_sources}) inconsistent with number found in file (${num_sources}).`)
 
   if(!Number.isInteger(meta.num_sources) || !Number.isInteger(meta.num_frac_delays)) {
     console.warn(`Delay table loaded with ${num_sources} sources and ${num_frac_delays} fractional delays.`)
@@ -178,10 +176,16 @@ export async function load_delay_table_csv(filename, opts, meta) {
     meta.num_frac_delays = num_frac_delays
   }
 
-  return {status: 'ok', table }
+  return ok(table)
+}
+type LoadDelayTableBinaryResult = {
+  table: DelayTable,
+  opts: any,
+  meta: Metadata,
+  binaryBuffer: ArrayBuffer,
 }
 
-export async function load_delay_table_binary(filename, opts, meta) {
+export async function load_delay_table_binary(filename: string, opts, meta: Metadata): Promise<Result<LoadDelayTableBinaryResult>> {
   const buf = await fs.readFile(filename)
 
   // First, figure out if we already have enough information to determine the shape and try to fill
@@ -191,12 +195,12 @@ export async function load_delay_table_binary(filename, opts, meta) {
     const impliedRowCount = buf.byteLength / impliedRowLen
 
     if(buf.byteLength % impliedRowCount != 0) 
-      return {status: 'err', reason: `Number of fractional delays ${meta.num_frac_delays} is inconsistent with binary delay table size ${buf.byteLength}.`}
+      return fail(`Number of fractional delays ${meta.num_frac_delays} is inconsistent with binary delay table size ${buf.byteLength}.`)
 
     meta.num_sources = impliedRowCount
   } else if(meta.num_frac_delays == null && meta.num_sources != null) {
     if(buf.byteLength % meta.num_sources != 0) 
-      return {status: 'err', reason: `Number of sources ${meta.num_sources} is inconsistent with binary delay table size ${buf.byteLength}.`}
+      return fail(`Number of sources ${meta.num_sources} is inconsistent with binary delay table size ${buf.byteLength}.`)
 
     const impliedRowLen = buf.byteLength / meta.num_sources
     const impliedFracDelays = (impliedRowLen - 20) / 2
@@ -205,16 +209,16 @@ export async function load_delay_table_binary(filename, opts, meta) {
     console.warn(`Attempting to load binary delay table with unspecified dimensions. If known, dimensions may be specified with --num-sources and --num-frac-delays.`)
     const result = detect_delay_table_shape_binary(buf.buffer, filename)
     if(result.status != 'ok')
-      return result
+      return fail(result.reason)
     meta.num_sources = result.num_sources
     meta.num_frac_delays = result.num_frac_delays
   }
 
-  const parseResult = parse_delay_table_binary(buf.buffer, opts, meta)
+  const parseResult = parse_delay_table_binary(buf.buffer, meta)
   if(parseResult.status != 'ok')
-    return parseResult
+    return fail(parseResult.reason)
 
-  return {status: 'ok', table: parseResult.table, opts, meta, binaryBuffer: buf}
+  return ok({table: parseResult.value, opts, meta, binaryBuffer: buf})
 }
 
 /** Load a delay table from a file.
@@ -223,23 +227,29 @@ export async function load_delay_table_binary(filename, opts, meta) {
  * are null. If specified, these values must be consistent with the actual file. Returns a status
  * object.
  */
-export async function load_delay_table(filename, opts, meta) {
+export async function load_delay_table(filename: string, opts, meta: Metadata): Promise<Result<DelayTable>> {
   if(opts.format_in == 'csv')
     return load_delay_table_csv(filename, opts, meta)
-  else if(opts.format_in == 'bin')
-    return load_delay_table_binary(filename, opts, meta)
-  else if(opts.format_in == 'auto') {
+  else if(opts.format_in == 'bin') {
+    const result = await load_delay_table_binary(filename, opts, meta)
+    if(result.status != 'ok')
+      return fail(result.reason)
+    return ok(result.value.table)
+  } else if(opts.format_in == 'auto') {
     const format = await detect_delay_table_format(filename)
     if(format == 'csv') {
       console.warn(`Detected CSV encoding for delay table file: '${filename}'.`)
       return load_delay_table_csv(filename, opts, meta)
     } else if(format == 'bin') {
       console.warn(`Detected binary encoding for delay table file: '${filename}'.`)
-      return load_delay_table_binary(filename, opts, meta)
+      const result = await load_delay_table_binary(filename, opts, meta)
+      if(result.status != 'ok')
+        return fail(result.reason)
+      return ok(result.value.table)
     } else
-      return {status: 'err', reason: `Could not detect delay table format for: ${filename}`}
+      return fail(`Could not detect delay table format for: ${filename}`)
   } else
-    return {status: 'err', reason: `Internal error: format_in not specified for: ${filename}`}
+    return fail(`Internal error: format_in not specified for: ${filename}`)
 }
 
 /*

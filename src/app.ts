@@ -42,6 +42,8 @@ async function main(args: string[]) {
     return runResample(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case 'bake':
     return runBake(parseResult.fixedArgs[0], parseResult.opts)
+  case 'patch':
+    return runPatch(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case null:
     return ok()
   default:
@@ -204,39 +206,34 @@ async function runShow(filename: string, opts) {
   return {status: 'ok'}
 }
 
-async function runDt(filename: string, opts) {
+async function runDt(filename: string, opts): Promise<Result<void>> {
   const meta = init_metadata()
   meta.filename = filename
   meta.num_sources = opts.num_sources_in
   meta.num_frac_delays = opts.num_frac_delays_in
-  const loadResult: any = await dt.load_delay_table(filename, opts, meta)
-  if(loadResult.status != 'ok') {
-    console.error(loadResult.reason)
-    return
-  }
-  const table = loadResult.table
+  const loadResult = await dt.load_delay_table(filename, opts, meta)
+  if(loadResult.status != 'ok')
+    return fail(loadResult.reason)
+  
+  const table = loadResult.value
   if(opts.compare_file) {
     
-    const loadCmpResult: any = await dt.load_delay_table(opts.compare_file, opts, meta)
-    if(loadCmpResult.status != 'ok') {
-      console.error(loadCmpResult.reason)
-      return
-    }
+    const loadCmpResult = await dt.load_delay_table(opts.compare_file, opts, meta)
+    if(loadCmpResult.status != 'ok')
+      return fail(loadCmpResult.reason)
     
-    const tableCmp = loadCmpResult.table
+    const tableCmp = loadCmpResult.value
     const diffResult = dt.compare_delays(tableCmp, table)
     
-    if(diffResult.status != 'ok') {
-      console.log(diffResult.reason)
-      return
-    }
+    if(diffResult.status != 'ok')
+      return fail(diffResult.reason)
     dt.print_delay_table(diffResult.table, null, opts, meta)
     
   } else {
-    dt.print_delay_table(table, loadResult.binaryBuffer, opts, meta)
+    dt.print_delay_table(table, null, opts, meta)
   }
 
-  return {status: 'ok'}
+  return ok()
 }
 
 async function runInfo(filename, opts) {
@@ -273,7 +270,7 @@ async function runRepoint(infilename, outfilename, opts) {
 
   const dtMeta = init_metadata()
   dtMeta.filename = opts.delay_table_filename
-  const loadDtResult: any = await dt.load_delay_table(opts.delay_table_filename, {format_in: 'auto'}, dtMeta)
+  const loadDtResult = await dt.load_delay_table(opts.delay_table_filename, {format_in: 'auto'}, dtMeta)
   if(loadDtResult.status != 'ok') {
     console.error(loadDtResult.reason)
     return
@@ -284,7 +281,7 @@ async function runRepoint(infilename, outfilename, opts) {
     return
   }
   const origDt = origDtResult.table
-  const newDt = loadDtResult.table
+  const newDt = loadDtResult.value
   const newDtBin = dt.serialise_delay_table(newDt, meta.num_sources, meta.num_frac_delays)
 
   const outputMeta = { ...meta, filename: outfilename}
@@ -376,7 +373,7 @@ async function runResample(infilename: string, outfilename: string, opts) {
   // Get delay table for looking up source indices
   const dtParseResult = dt.parse_delay_table_binary(dtResult.buf, meta, 0)
   if(dtParseResult.status != 'ok') return dtParseResult
-  const delayTable = dtParseResult.table
+  const delayTable = dtParseResult.value
 
   const rules: TransformerSet = {}
   for(let spec of opts.resample_rules) {
@@ -450,6 +447,28 @@ async function runBake(ifname: string, opts): Promise<Result<void>> {
   return ok()
 }
 
+async function runPatch(pfname: string, sfname: string, opts): Promise<Result<void>> {
+  if(opts.patch_section == null)
+    return fail(`Section to patch must be specified (--section=SECTION).`)
+  if(opts.patch_section != 'dt')
+    return fail(`Patching section '${opts.patch_section}' is not implemented.`)
+
+  const subLoadResult = await load_subfile(sfname, 'r+')
+  if(subLoadResult.status != 'ok')
+    return fail(subLoadResult.reason)
+  const {file} = subLoadResult
+  const meta: Metadata = subLoadResult.meta
+
+  const patchLoadResult = await dt.load_delay_table(pfname, {format_in: 'auto'}, meta)
+  if(patchLoadResult.status != 'ok')
+    return fail(patchLoadResult.reason)
+
+  const writeResult = await overwrite_delay_table(patchLoadResult.value, meta, file)
+  if(writeResult.status != 'ok')
+    return fail(writeResult.reason)
+
+  return ok()
+}
 
 
 const result: any = await main(process.argv.slice(2)) /*.catch(e => {
@@ -457,4 +476,4 @@ const result: any = await main(process.argv.slice(2)) /*.catch(e => {
 })*/
 
 if(result.status != 'ok')
-  console.log(`${result.reason}`)
+  console.error(`${result.reason}`)

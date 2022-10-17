@@ -4,7 +4,8 @@ import {TransformSpec, Result} from "./types"
 const USAGE = `subtool <COMMAND> [opts] [FILE]
 
 Available commands:
-  info, get, set, unset, show, dt, dump, repoint, replace, resample, bake
+  info, get, set, unset, show, dt, dump, 
+  repoint, replace, resample, bake, patch
 
 INFO COMMAND (info)
 Print a summary of information about the subfile.
@@ -126,6 +127,22 @@ table values to zero. Operates in-place.
   FILE                    Path to subfile.    
   --source=A[,B...]       Process only the specified RF sources.
   --fft-size=SIZE         Number of points in FFT (default: 8192).
+
+PATCH COMMAND (patch)
+Overwrite a section of a subfile with data loaded from a file.
+
+      subtool patch [patch_opts] <PATCH> <SUBFILE>
+
+  PATCH                   Path to replacement data.
+  SUBFILE                 Path to subfile.
+  --section=SECTION       Section to replace:
+                            header   Subfile header.
+                            dt       Delay table.
+                            udpmap   UDP packet map.
+                            margin   Margin data.
+                            data     Entire sample data section.
+                            preamble Header + block 0.
+
 `
 /*
 SIGNAL PROCESSOR COMMAND (dsp)
@@ -369,6 +386,19 @@ const schema = {
     defaults: {
       bake_fft_size: 8192,
       bake_source: null,
+    },
+  },
+  patch: {
+    args: ["PATCH", "SUBFILE"],
+    opts: {
+      "--section": {
+        type: "enum",
+        prop: "patch_section",
+        values: ["header", "dt", "udpmap", "margin", "data", "preamble"],
+      },
+    },
+    defaults: {
+      patch_section: null,
     },
   },
   /*dsp: {
