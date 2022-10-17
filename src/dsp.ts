@@ -75,6 +75,7 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
   const istorage = fft.createComplexArray()
   const ostorage = fft.createComplexArray()
   const fft_len = fft_size / sample_rate
+  const chan_bw = 1 / fft_len
 
   function filter(idata: Int8Array, odata: Int8Array, blockIdx: number): void {
     // Where are we in the stream? Use the middle sample of the block and find the nearest delay value.
@@ -89,9 +90,9 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {
       const freq = sampleIdx / (fft_size * fft_len)
       const fineOffset = freq * delay * Math.PI * 2
-      const offset = fineOffset + dcOffset
+      const offset = dcOffset - fineOffset
       const oldSample: Z = [istorage[sampleIdx*2], istorage[sampleIdx*2+1]]
-      const newSample = complex_rotate(offset, oldSample)
+      const newSample = complex_rotate(-offset, oldSample)
       istorage[sampleIdx*2] = newSample[0]
       istorage[sampleIdx*2+1] = newSample[1]
     }

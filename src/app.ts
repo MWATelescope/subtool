@@ -431,6 +431,8 @@ async function runBake(ifname: string, opts): Promise<Result<void>> {
   process.stderr.write('Baking delays for sources...')
   for(let lineNum=0; lineNum<meta.num_sources; lineNum++) {
     const row = meta.delay_table[lineNum]
+    if(opts.bake_source != null && !opts.bake_source.includes(row.rf_input))
+      continue
     const extractResult = await extract_source(lineNum, false, file, meta, cache)
     if(extractResult.status != 'ok')
       return fail(extractResult.reason)

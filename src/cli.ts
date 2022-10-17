@@ -124,6 +124,8 @@ table values to zero. Operates in-place.
       subtool bake <FILE>
 
   FILE                    Path to subfile.    
+  --source=A[,B...]       Process only the specified RF sources.
+  --fft-size=SIZE         Number of points in FFT (default: 8192).
 `
 /*
 SIGNAL PROCESSOR COMMAND (dsp)
@@ -359,9 +361,14 @@ const schema = {
         type: "uint",
         prop: "bake_fft_size",
       },
+      "--source": {
+        type: "uint-list",
+        prop: "bake_source",
+      },
     },
     defaults: {
       bake_fft_size: 8192,
+      bake_source: null,
     },
   },
   /*dsp: {
