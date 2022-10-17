@@ -38,9 +38,8 @@ function apply_block_transform(fn: BlockTransform, size: number, idata: Int8Arra
     const iblock = idata.subarray(i*size*2, (i+1)*size*2)
     const oblock = odata.subarray(i*size*2, (i+1)*size*2)
     fn(iblock, oblock, i)
-    //console.log(iblock, oblock)
-    //if(i>=3) { throw 'bang' }
   }
+  //throw "bang"
 }
 
 function make_band_pass_filter(fmin: number, fmax: number, bandwidth: number, fftsize: number): BlockTransform {
@@ -79,12 +78,14 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
 
   function filter(idata: Int8Array, odata: Int8Array, blockIdx: number): void {
     // Where are we in the stream? Use the middle sample of the block and find the nearest delay value.
-    const middleSample = blockIdx * (idata.length / 2) + idata.length / 4
+    const middleSample = blockIdx * fft_size + fft_size / 2
     const delayIdx = Math.floor(delays.length * middleSample / stream_len)
+    //console.log(delayIdx)
+    const timeOffset = middleSample / sample_rate
     const millisampleDelay = delays[delayIdx]
     const delay = millisampleDelay/1000 / sample_rate
-    const dcOffset = centre * delay * Math.PI * 2
-    
+    const dcOffset = centre * (delay + timeOffset) * Math.PI * 2
+    //console.log(millisampleDelay, delay, dcOffset)
     fft.transform(istorage, idata)
  
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {
@@ -97,7 +98,6 @@ function make_frac_delay_filter(delays: Int16Array, centre: number, stream_len: 
       istorage[sampleIdx*2+1] = newSample[1]
     }
     fft.inverseTransform(ostorage, istorage)
-    //console.log(blockIdx, odata.length, ostorage.length)
     odata.set(ostorage)
   }
   return filter
