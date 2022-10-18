@@ -80,18 +80,15 @@ function make_frac_delay_filter(delays: Int32Array, centre: number, stream_len: 
     // Where are we in the stream? Use the middle sample of the block and find the nearest delay value.
     const middleSample = blockIdx * fft_size + fft_size / 2
     const delayIdx = Math.floor(delays.length * middleSample / stream_len)
-    //console.log(delayIdx)
-    const timeOffset = 0 // middleSample / sample_rate
     const microsampleDelay = delays[delayIdx]
     const delay = microsampleDelay/1000000 / sample_rate
-    const dcOffset = centre * (delay + timeOffset) * Math.PI * 2
-    //console.log(microsampleDelay, timeOffset, delay, dcOffset)
+    const dcOffset = centre * delay * Math.PI * 2
     fft.transform(istorage, idata)
  
     for(let sampleIdx=0; sampleIdx < fft_size; sampleIdx++) {
       const freq = sampleIdx / (fft_size * fft_len)
       const fineOffset = freq * delay * Math.PI * 2
-      const offset = dcOffset + fineOffset
+      const offset = dcOffset - fineOffset
       const oldSample: Z = [istorage[sampleIdx*2], istorage[sampleIdx*2+1]]
       const newSample = complex_rotate(-offset, oldSample)
       istorage[sampleIdx*2] = newSample[0]
