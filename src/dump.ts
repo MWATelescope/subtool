@@ -13,7 +13,7 @@ export async function runDump(subfilename: string, outfilename: string, opts) {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta} = loadResult
+  const {file, meta} = loadResult.value
 
   let result: Result<ArrayBuffer> = null
   if(opts.dump_section == 'preamble') {

@@ -88,6 +88,7 @@ Read and write delay table files, select subsets and compare between them.
                             pretty   Table aligned values with headings.
                             csv      Comma-separated values.
                             bin      Raw binary data.
+  --version-out=N         Force output compatible with subfile spec version N.
 
 DUMP COMMAND (dump)
 Write binary contents of a subfile section to a file.
@@ -240,6 +241,22 @@ const schema = {
         type: "string",
         prop: "compare_file",
       },
+      "--version-out": {
+        type: "uint",
+        prop: "dt_version_out",
+      },
+      "--no-colour": {
+        type: "iflag",
+        prop: "dt_use_colour",
+      },
+      "--allow-wrap": {
+        type: "flag",
+        prop: "dt_allow_wrap",
+      },
+      "--frac-digits": {
+        type: "uint",
+        prop: "dt_frac_digits",
+      },
     },
     defaults: {
       format_in: "auto",
@@ -248,6 +265,10 @@ const schema = {
       num_frac_delays: null,
       num_sources: null,
       compare_file: null,
+      dt_version_out: -1,
+      dt_use_colour: true,
+      dt_frac_digits: 6,
+      dt_allow_wrap: false,
     },
   },
   get: {
@@ -428,6 +449,7 @@ const schema = {
   },*/
 }
 
+
 function parse_uint(str: string): Result<number> {
   const num = Number.parseInt(str)
   if(!Number.isInteger(num) || num < 0)
@@ -529,6 +551,9 @@ function parse_opt(name: string, remaining: string[], optSchema, opts) {
   const shape = optSchema[name]
   if(shape.type == 'flag') {
     opts[shape.prop] = true
+    return {status: 'ok', remaining}
+  } else if(shape.type == 'iflag') {
+    opts[shape.prop] = false
     return {status: 'ok', remaining}
   }
 

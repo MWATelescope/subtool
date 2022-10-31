@@ -2,7 +2,7 @@ import {Metadata, Result} from './types.js'
 import type { Cache } from './cache'
 import { read_section } from './reader.js'
 import {FileHandle} from 'fs/promises'
-import {fail, ok} from './util.js'
+import {fail, fail_with, is_ok, ok} from './util.js'
 
 
 // HDR_SIZE            4096                 POPULATED           1                    OBS_ID              1343457784           SUBOBS_ID           1343457864
@@ -49,6 +49,8 @@ const HEADER_FIELDS = {
   MC_SRC_IP:           { index: 31, type: 'string' },
   MWAX_U2S_VER:        { index: 32, type: 'string' },
   FRAC_DELAY_SIZE:     { index: 33, type: 'number' },
+  APPLY_PHASE_OFFSETS: { index: 34, type: 'number' },
+  MWAX_SUB_VER:        { index: 35, type: 'number' },
 }
 
 export function print_header(header, headerBuf: ArrayBuffer, opts) {
@@ -70,11 +72,6 @@ export function print_header(header, headerBuf: ArrayBuffer, opts) {
 
 /** Parse a header fragment, returning a list of key,value pairs. */
 export function parse_header(buf) {
-  const INTEGER_FIELDS = [
-    'HDR_SIZE', 'POPULATED', 'OBS_ID', 'SUBOBS_ID', 'OBS_OFFSET', 'NBIT', 'NPOL', 'NTIMESAMPLES', 'NINPUTS', 
-    'NINPUTS_XGPU', 'APPLY_PATH_WEIGHTS', 'APPLY_PATH_DELAYS', 'INT_TIME_MSEC', 'FSCRUNCH_FACTOR', 'APPLY_VIS_WEIGHTS', 
-    'TRANSFER_SIZE', 'EXPOSURE_SECS', 'COARSE_CHANNEL', 'CORR_COARSE_CHANNEL', 'SECS_PER_SUBOBS', 'UNIXTIME',
-    'UNIXTIME_MSEC', 'FINE_CHAN_WIDTH_HZ', 'NFINE_CHAN', 'BANDWIDTH_HZ', 'SAMPLE_RATE', 'MC_PORT']
   const text = new TextDecoder().decode(buf).replace(/\0*/g,'').trim()
   const fields = text.split('\n').map(x => x.split(' ')).map(([k,v]) => {
     if(k in HEADER_FIELDS && HEADER_FIELDS[k].type == 'number')
@@ -88,14 +85,13 @@ export function parse_header(buf) {
 /** Read the header section from a subfile. */
 export async function read_header(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<any>> {
   const sectionResult = await read_section('header', file, meta, cache)
-  if(sectionResult.status != 'ok')
-    return fail(sectionResult.reason)
-
+  if(!is_ok(sectionResult))
+    return fail_with(sectionResult)
   const header = parse_header(sectionResult.value)
   return ok(header)
 }
 
-export function set_header_value(key, value, header, force=false) {
+export function set_header_value(key, value, header, force=false): Result<void> {
   if(key in HEADER_FIELDS || force) {
     switch(HEADER_FIELDS[key]?.type) {
       case 'number':
@@ -108,8 +104,8 @@ export function set_header_value(key, value, header, force=false) {
         header[key] = value
         console.warn(`Warning: unknown type for header field ${key}.`)
     }
-    return {status: 'ok'}
-  } else return {status: 'invalid', reason: `No such key: ${key}.`}
+    return ok()
+  } else return fail(`No such key: ${key}.`)
 }
 
 export function serialise_header(header, meta: Metadata): ArrayBuffer {

@@ -22,6 +22,7 @@ export type Metadata = {
   margin_packets: number;     // (sub) number of margin packets per source at each end
   margin_samples: number;     // (sub) number of margin samples per source at each end
   dt_present: boolean;        // (ALL) is a delay table section present in the file?
+  dt_entry_min_size: number;  // (sub) byte length of a delay table entry minus frac delays
   dt_offset: number;          // (ALL) byte offset of delay table
   dt_length: number;          // (ALL) byte length of delay table
   header_present: boolean;    // (ALL) is a header section present in the file?
@@ -37,7 +38,8 @@ export type Metadata = {
   udpmap_offset: number;      // (sub) byte offset of packet map
   udpmap_length: number;      // (sub) byte length of packet map
   sources: number[];          // (sub) rf sources in order of appearance
-  delay_table: DelayTable;    // (sub) delay table
+  delay_table: DelayTableV2;    // (sub) delay table
+  mwax_sub_version: number;   // (sub) version of the subfile format
 }
 
 export type OutputDescriptor = {
@@ -97,6 +99,26 @@ export type HPDelayTableEntry = {
 
 export type HPDelayTable = HPDelayTableEntry[]
 
+export type DelayTableV2Entry = {
+  rf_input: number;
+  ws_delay: number;
+  initial_delay: number;
+  delta_delay: number;
+  delta_delta_delay: number; 
+  start_total_delay: number;
+  middle_total_delay: number;
+  end_total_delay: number;
+  num_pointings: number;
+  _reserved: number;
+  frac_delay: Float32Array;
+}
+
+export type DelayTableV2 = {
+  format_version: number,
+  num_fracs: number,
+  entries: DelayTableV2Entry[],
+}
+
 export type SourceMap = {
   [k: number]: number;
 }
@@ -112,8 +134,14 @@ export type BlockTransform = (idata: Int8Array, odata: Int8Array, index: number)
 export type Result<T> = {
   status: string;
   value: T;
-  reason?: string;
+  reason?: string;   // Reason for error
+  location?: ErrorLocation[];  // Breadcrumbs for location of error
 }
+
+export type Resultant<A, B> = (a: A) => Result<B>
+export type AsyncResultant<A, B> = (a: A) => Promise<Result<B>>
+
+export type ErrorLocation = string | number
 
 export type TransformSpec = {
   sources: number[];

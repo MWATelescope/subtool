@@ -1,5 +1,8 @@
 import { FileHandle } from 'fs/promises'
-import type { Metadata, Result, Z } from './types'
+import * as fs from 'node:fs/promises'
+import type { AsyncResultant, ErrorLocation, Metadata, Result, Resultant, Z } from './types'
+
+const {round} = Math
 
 /** Create a new metadata object, used for tracking information about files. */
 export function init_metadata(): Metadata { 
@@ -40,7 +43,9 @@ export function init_metadata(): Metadata {
     udpmap_offset: null,     
     udpmap_length: null,     
     sources: null,      
-    delay_table: null,     
+    delay_table: null,    
+    mwax_sub_version: null, 
+    dt_entry_min_size: null,
   }
 }
 
@@ -105,28 +110,6 @@ export async function write_section(name: string, buffer: ArrayBuffer, file: Fil
   return {status: 'ok'}
 }
 
-/** Get the results for a list of action Promises. */
-export async function await_all<T>(tasks: Promise<Result<T>>[]): Promise<Result<T[]>> {
-  const values = []
-  for(let task of tasks) {
-    const result = await task
-    if(result.status != 'ok')
-      return fail(result.reason)
-    values.push(result.value)
-  }
-  return ok(values)
-}
-
-export function all<T>(results: Result<T>[]): Result<T[]> {
-  const vals = []
-  for(let result of results) {
-    if(result.status != 'ok') 
-      return fail(result.reason)
-    vals.push(result.value)
-  }
-  return ok(vals)
-}
-
 export function unpack(x: number): Z {
   return [x & 255, (x >> 8) & 255]
 }
@@ -144,13 +127,94 @@ export function formatZ([r, i]: Z) {
                 : `${r}${i}i`
 }
 
-export function fail<T>(reason: string): Result<T> {
-  return {status: 'err', reason, value: null}
-}
+/*
+ *  Result monad
+ */
 
 export function ok<T>(value: T = null): Result<T> {
   return {status: 'ok', value}
 }
+
+export function is_ok<T>(result: Result<T>): boolean {
+  return result.status == 'ok'
+}
+
+export function fail<T>(reason: string): Result<T> {
+  return {status: 'err', reason, location: [], value: null}
+}
+
+/** Fail at a specified location. */
+export function fail_at<T>(reason: string, place: ErrorLocation): Result<T> {
+  return {status: 'err', reason, location: [place], value: null}
+}
+
+/** Convert a failure with another success type, without adding a bread crumb to the trail. */
+export function fail_with<T, U>(result: Result<T>): Result<U> {
+  return {status: 'err', reason: result.reason, location: result.location, value: null}
+}
+
+/** Convert a failure with another success type, adding a bread crumb to the trail. */
+export function fail_from<T, U>(result: Result<T>, place: ErrorLocation): Result<U> {
+  return {status: 'err', reason: result.reason, location: [place, ...result.location], value: null}
+}
+
+export function fmap<A, B>(f: (x:A) => B, ma: Result<A>): Result<B> {
+  if(!is_ok(ma))
+    return fail_with(ma)
+  else
+    return ok(f(ma.value))
+}
+
+/** Pipe a result into a resultant function. */
+export function bind<A, B>(ra: Result<A>, f: Resultant<A,B>): Result<B> {
+  if(!is_ok(ra))
+    return fail_with(ra)
+  else
+    return f(ra.value)
+}
+
+/** Pipe a promised result into a resultant function. */
+export async function async_bind<A, B>(pa: Promise<Result<A>>, f: Resultant<A,B>): Promise<Result<B>> {
+  return bind(await pa, f)
+}
+
+/** Kleisli composition of two resultants. */
+export function arrow<A,B,C>(f: Resultant<A,B>, g: Resultant<B,C>): Resultant<A,C> {
+  return x => bind(f(x), g)
+}
+
+/** Kleisli composition of an async resultant to a resultant. */
+export function async_arrow<A,B,C>(f: AsyncResultant<A,B>, g: Resultant<B,C>): AsyncResultant<A,C> {
+  return async x => bind(await f(x), g)
+}
+
+/** Get the results for a list of action Promises. */
+export async function await_all<T>(tasks: Promise<Result<T>>[]): Promise<Result<T[]>> {
+  const values = []
+  for(let task of tasks) {
+    const result = await task
+    if(result.status != 'ok')
+      return fail(result.reason)
+    values.push(result.value)
+  }
+  return ok(values)
+}
+
+export function all<T>(results: Result<T>[]): Result<T[]> {
+  const vals = []
+  for(let i=0; i<results.length; i++) {
+    const result = results[i]
+    if(!is_ok(result)) 
+      return fail_from(result, i)
+    vals.push(result.value)
+  }
+  return ok(vals)
+}
+
+
+/*
+ *  Data access (should go somewhere else)
+ */
 
 /** Get the head or tail margin samples for a given source ID. */
 export function get_margin(id: number, data: Int8Array, meta: Metadata, getHead=true, includeOverlap=true) {
@@ -172,6 +236,11 @@ export function get_line(id: number, blockData: Int8Array, meta: Metadata) {
   return blockData.subarray(id * meta.samples_per_line * 2, (id+1) * meta.samples_per_line * 2)
 }
 
+
+/*
+ *  Complex numbers
+ */
+
 export function complex_mul([a, b]:Z, [c, d]:Z): Z {
   return [a*c - b*d, a*d + b*c]
 }
@@ -180,3 +249,48 @@ export function complex_rotate(radians: number, x: Z): Z {
   return complex_mul(x, [Math.cos(radians), -Math.sin(radians)]) 
 }
 
+
+/*
+ *  File IO
+ */
+
+/** Read the entire contents of a file into an ArrayBuffer. */
+export async function read_file(path: string): Promise<Result<ArrayBuffer>> {
+  return await fs.readFile(path)
+    .then(buffer => ok(buffer.buffer))
+    .catch(reason => fail(reason))
+}
+
+
+/*
+ *  Higher-order functions
+ */
+
+/** Apply a list of functions to a list of values pair-wise. */
+export function apply_each<A, B>(xs: A[], fs: ((x:A) => B)[]): B[] {
+  return fs.map((f,i) => f(xs[i]))
+}
+
+
+/*
+ *  String formatting
+ */
+
+export function format_colour(colour: 'yellow' | 'cyan', x: string) {
+  const code = colour == 'yellow' ? '\x1b[33m' : '\x1b[36m'
+  return `${code}${x}\x1b[0m`
+}
+
+/** Convert an integer to a right-aligned string.
+ * No padding is performed if the integer converts to a string longer than `width`. 
+ */
+export function align_int(width: number, x: number): string {
+  return x.toString().padStart(width, ' ')
+}
+
+/** Convert a float to a right-aligned string with the given precision.
+ * No padding is performed if the integer converts to a string longer than `width`. 
+ */
+ export function align_float(width: number, digits: number, x: number): string {
+  return x.toFixed(digits).padStart(width, ' ')
+}

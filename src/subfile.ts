@@ -65,19 +65,26 @@
 
 import * as fs from 'node:fs/promises'
 import { FileHandle } from 'fs/promises'
-import * as dt from './dt.js'
+import * as dtv2 from './dtv2.js'
 import { read_header, serialise_header, set_header_value } from './header.js'
-import { await_all, fail, init_metadata, ok } from './util.js'
+import { all, async_bind, await_all, fail, fail_with, init_metadata, is_ok, ok } from './util.js'
 import * as rp from './repoint.js'
 import * as rs from './resample.js'
-import type { DelayTable, Metadata, OutputDescriptor, Result, SourceMap } from './types'
+import type { DelayTableV2, Metadata, OutputDescriptor, Result, SourceMap } from './types'
 import type { Cache } from './cache'
 import {cache_create} from './cache.js'
 import {read_block, read_section} from './reader.js'
-import {read_delay_table} from './dt.js'
+
+
+export type SubfileContext = {
+  file: FileHandle,
+  meta: Metadata,
+  cache: Cache,
+  header: any,
+}
 
 /** Load a subfile, gather basic info. */
-export async function load_subfile(filename: string, mode='r', cache: Cache = null) {
+export async function load_subfile(filename: string, mode='r', cache: Cache = null): Promise<Result<SubfileContext>> {
   if(cache == null)
     cache = cache_create(2 ** 30) // 1GB
 
@@ -109,17 +116,19 @@ export async function load_subfile(filename: string, mode='r', cache: Cache = nu
   meta.subobservation_id = header.SUBOBS_ID
   meta.samples_per_line = header.NTIMESAMPLES
   meta.margin_samples = header.MARGIN_SAMPLES ?? meta.margin_packets * meta.samples_per_packet
-  meta.frac_delay_size = header.FRAC_DELAY_SIZE ?? 2
-  const dt_row_pad = meta.frac_delay_size == 2 ? 2 : 0 // FIXME: hack
-
+  meta.mwax_sub_version = header.MWAX_SUB_VER ?? 1
+  
   meta.blocks_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_line
   meta.blocks_per_sec = meta.blocks_per_sub / meta.secs_per_subobs
   meta.sub_line_size = meta.samples_per_line * 2
   meta.num_frac_delays = meta.blocks_per_sub * meta.fft_per_block
   meta.udp_per_rf_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_packet
   meta.udp_payload_length = meta.samples_per_packet * 2
-  meta.dt_length = meta.num_sources * (18 + dt_row_pad + meta.num_frac_delays*meta.frac_delay_size)
+  meta.frac_delay_size = meta.mwax_sub_version == 1 ? 2 : 4
+
   meta.block_length = meta.sub_line_size * meta.num_sources
+  meta.dt_entry_min_size = meta.mwax_sub_version == 1 ? 20 : 56
+  meta.dt_length = meta.num_sources * (meta.num_frac_delays * meta.frac_delay_size + meta.dt_entry_min_size)
   meta.data_present = true
   meta.data_offset = meta.header_length + meta.block_length
   meta.data_length = meta.block_length * meta.blocks_per_sub
@@ -128,17 +137,18 @@ export async function load_subfile(filename: string, mode='r', cache: Cache = nu
   meta.udpmap_length = meta.num_sources * meta.udp_per_rf_per_sub / 8
   meta.margin_present = true
   meta.margin_offset = meta.udpmap_offset + meta.udpmap_length
-  meta.margin_length = meta.num_sources * meta.margin_samples * 2 * 2
-
-  const dtResult = await dt.read_delay_table(file, meta, cache)
-  if(dtResult.status != 'ok')
-    return dtResult
-  const delayTable = dtResult.value
+  meta.margin_length = meta.num_sources * meta.margin_samples * 2 * 2  
   
-  meta.delay_table = delayTable
-  meta.sources = delayTable.map(x => x.rf_input)
+  const dtResult = await async_bind(
+    read_section('dt', file, meta, cache), 
+    buf => dtv2.parse_delay_table_binary(buf, meta.mwax_sub_version, meta.num_sources, meta.num_frac_delays)
+  )
+  if(!is_ok(dtResult))
+    return fail_with(dtResult)
+  meta.delay_table = dtResult.value
+  meta.sources = meta.delay_table.entries.map(x => x.rf_input)
 
-  return {status: 'ok', file, meta, header, cache}
+  return ok({file, meta, header, cache})
 }
 
 
@@ -217,11 +227,7 @@ function copy_block_with_remapping(inBlk: Uint16Array, outBlk: Uint16Array, map:
 
 /** Get the line number for a source ID. */
 export async function source_to_line(sourceId: number, file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<number>> {
-  const readResult = await read_delay_table(file, meta, cache)
-  if(readResult.status != 'ok')
-    return fail(readResult.reason)
-  const table = readResult.value
-  const idx = table.findIndex(row => row.rf_input == sourceId)
+  const idx = meta.delay_table.entries.findIndex(row => row.rf_input == sourceId)
   if(idx == -1)
     return fail(`RF Source ID ${sourceId} not found in subfile.`)
   return ok(idx)
@@ -247,8 +253,11 @@ export async function overwrite_line(lineNum: number, blockNum: number, samples:
 }
 
 /** Overwrite the delay table. */
-export async function overwrite_delay_table(table: DelayTable, meta: Metadata, file: FileHandle): Promise<Result<void>> {
-  const buf = dt.serialise_delay_table(table, meta.num_sources, meta.num_frac_delays, meta.frac_delay_size)
+export async function overwrite_delay_table(table: DelayTableV2, meta: Metadata, file: FileHandle): Promise<Result<void>> {
+  const result = dtv2.serialise_delay_table(table)
+  if(!is_ok(result))
+    return fail_with(result)
+  const buf = result.value
   const position = meta.dt_offset
   const length = meta.dt_length
   await file.write(Buffer.from(buf), 0, length, position)
@@ -269,8 +278,8 @@ export async function overwrite_section(name: string, buf: ArrayBuffer, meta: Me
 
 /** Change the size of the delay table fractional delays from 2 to 4 bytes. */
 export async function upgrade_delay_table(file: FileHandle, meta: Metadata, cache: Cache): Promise<Result<void>> {
-  if(meta.frac_delay_size == 4) {
-    console.warn(`Nothing to do. This subfile already uses 4-byte fractional delays.`)
+  if(meta.mwax_sub_version == 2) {
+    console.warn(`Nothing to do. This subfile is already in version 2 format.`)
     return ok()
   }
   const result = await await_all([
@@ -279,11 +288,13 @@ export async function upgrade_delay_table(file: FileHandle, meta: Metadata, cach
   ])
   const [udpmap, margin] = result.value
   meta.frac_delay_size = 4
-  const new_dt_length = meta.num_sources * (18 + meta.num_frac_delays*4)
+  meta.dt_entry_min_size = 56
+  const new_dt_length = meta.num_sources * (meta.dt_entry_min_size + meta.num_frac_delays*meta.frac_delay_size)
   const dt_length_diff = new_dt_length - meta.dt_length
   meta.dt_length = new_dt_length
   meta.udpmap_offset += dt_length_diff
   meta.margin_offset += dt_length_diff
+  meta.delay_table.format_version = 2
   await overwrite_section('udpmap', udpmap, meta, file)
   await overwrite_section('margin', margin, meta, file)
   await overwrite_delay_table(meta.delay_table, meta, file)
@@ -292,7 +303,10 @@ export async function upgrade_delay_table(file: FileHandle, meta: Metadata, cach
   if(headerResult.status != 'ok')
     return headerResult
   const header = headerResult.value
-  const setResult = set_header_value('FRAC_DELAY_SIZE', 4, header, true)
+  const setResult = all([
+    set_header_value('FRAC_DELAY_SIZE', 4, header, true),
+    set_header_value('MWAX_SUB_VER', 2, header, true),
+  ])
   if(setResult.status != 'ok')
     return fail(setResult.reason)
   const headerBuf = serialise_header(header, meta)

@@ -1,17 +1,17 @@
 import * as fs from 'node:fs/promises'
 import { parse_command_line } from './cli.js'
-import * as dt from './dt.js'
+import * as dt from './dtv2.js'
 import * as dump from './dump.js'
 import { load_subfile, overwrite_delay_table, overwrite_samples, upgrade_delay_table, write_subfile } from './subfile.js'
 import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
-import { read_section, init_metadata, write_section, ok, fail } from './util.js'
+import { init_metadata, write_section, ok, fail, is_ok, fail_with, async_arrow, fmap, await_all } from './util.js'
 import type { Metadata, OutputDescriptor, Result, SourceMap, TransformerSet, TransformSpec } from './types'
 import { FileHandle } from 'node:fs/promises'
 import {make_phase_gradient_resampler, make_resampler_transform} from './resample.js'
 import {cache_create, print_cache_stats} from './cache.js'
 import {extract_source} from './dump.js'
 import {bake_delays} from './dsp.js'
-import {read_block} from './reader.js'
+import {read_block, read_section} from './reader.js'
 
 
 async function main(args: string[]) {
@@ -55,11 +55,11 @@ async function main(args: string[]) {
   return ok()
 }
 
-async function runGet(key: string, filename: string, opts) {
+async function runGet(key: string, filename: string, opts: any) {
   const loadResult = await load_subfile(filename)
   if(loadResult.status != 'ok')
     return loadResult
-  const {meta, file, cache} = loadResult
+  const {meta, file, cache} = loadResult.value
   const headerResult = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
@@ -73,11 +73,11 @@ async function runGet(key: string, filename: string, opts) {
   return ok()
 }
 
-async function runSet(key: string, value: string, filename: string, opts) {
+async function runSet(key: string, value: string, filename: string, opts: any) {
   const loadResult = await load_subfile(filename, 'r+')
   if(loadResult.status != 'ok')
     return loadResult
-  const {meta, file, cache} = loadResult
+  const {meta, file, cache} = loadResult.value
   const headerResult = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
@@ -96,11 +96,11 @@ async function runSet(key: string, value: string, filename: string, opts) {
   return ok()
 }
 
-async function runUnset(key: string, filename: string, opts) {
+async function runUnset(key: string, filename: string, opts: any) {
   const loadResult = await load_subfile(filename, 'r+')
   if(loadResult.status != 'ok')
     return loadResult
-  const {meta, file, cache} = loadResult
+  const {meta, file, cache} = loadResult.value
   const headerResult = await read_header(file, meta, cache)
   if(headerResult.status != 'ok')
     return headerResult
@@ -122,13 +122,12 @@ async function runUnset(key: string, filename: string, opts) {
   return {status: 'ok'}
 }
 
-async function runShow(filename: string, opts) {
+async function runShow(filename: string, opts: any) {
   const file: FileHandle = await fs.open(filename, 'r')
   const loadResult = await load_subfile(filename)
   if(loadResult.status != 'ok')
     return loadResult
-  const meta = loadResult.meta
-  const cache = loadResult.cache
+  const {meta, cache} = loadResult.value
 
   // Read header
   // We always do this, even if we're not printing it, since everything else depends on it (except
@@ -160,9 +159,9 @@ async function runShow(filename: string, opts) {
   //  const tile = dt.parse_delay_table_row(view, meta)
   //  tiles.push(tile)
   //}
-  if(opts.show_delay_table)
-    dt.print_delay_table(tiles, null, opts, meta)
-  
+  if(opts.show_delay_table) {
+    console.log(dt.format_delay_table_pretty(meta.delay_table))
+  }
 
   // Read voltages
   if(!opts.show_data) {
@@ -172,7 +171,7 @@ async function runShow(filename: string, opts) {
   const selected_ids = []
   if(opts.selected_sources != null) {
     for(let src of opts.selected_sources) {
-      const idx = tiles.findIndex(tile => tile.rf_input == src)
+      const idx = tiles.entries.findIndex(tile => tile.rf_input == src)
       if(idx == -1) {
         console.warn(`Warning: source ${src} not found in file.`)
         continue
@@ -180,7 +179,7 @@ async function runShow(filename: string, opts) {
       selected_ids.push(idx)
     }
   } else {
-    for(let i=0; i<tiles.length; i++)
+    for(let i=0; i<tiles.entries.length; i++)
       selected_ids.push(i)
   }
   
@@ -193,7 +192,7 @@ async function runShow(filename: string, opts) {
   for(let i of selected_ids) {
     const xs = dataBlock.subarray(i*meta.sub_line_size, (i+1)*meta.sub_line_size)
     //let str = 
-    process.stdout.write(`${tiles[i].rf_input.toString().padStart(4, ' ')} `)
+    process.stdout.write(`${tiles.entries[i].rf_input.toString().padStart(4, ' ')} `)
     for(let j=0; j<nSamples; j++) {
       let [re, im] = [xs[j*2], xs[j*2+1]]
       let [reStr, imStr] = [`${re}`, im >= 0 ? `+${im}` : `${im}`]
@@ -208,43 +207,57 @@ async function runShow(filename: string, opts) {
   return {status: 'ok'}
 }
 
-async function runDt(filename: string, opts): Promise<Result<void>> {
-  const meta = init_metadata()
-  meta.filename = filename
-  meta.num_sources = opts.num_sources_in
-  meta.num_frac_delays = opts.num_frac_delays_in
-  const loadResult = await dt.load_delay_table(filename, opts, meta)
-  if(loadResult.status != 'ok')
-    return fail(loadResult.reason)
-  
-  const table = loadResult.value
+async function runDt(filename: string, opts: any): Promise<Result<void>> {
+  const result = await dt.load_delay_table(filename)
+  if(!is_ok(result))
+    return fail_with(result)
+  const table = result.value
   if(opts.compare_file) {
-    
-    const loadCmpResult = await dt.load_delay_table(opts.compare_file, opts, meta)
-    if(loadCmpResult.status != 'ok')
-      return fail(loadCmpResult.reason)
-    
-    const tableCmp = loadCmpResult.value
-    const diffResult = dt.compare_delays(tableCmp, table)
-    
-    if(diffResult.status != 'ok')
-      return fail(diffResult.reason)
-    dt.print_delay_table(diffResult.table, null, opts, meta)
-    
+    const cmpResult = await async_arrow(dt.load_delay_table, cmp => dt.compare_delay_tables(cmp, table))(opts.compare_file)
+    if(!is_ok(cmpResult))
+      return fail_with(cmpResult)
+    const diff = cmpResult.value
+    switch(opts.format_out) {
+      case 'csv':
+        console.log(dt.format_delay_table_csv(diff))
+        break
+      case 'pretty':
+        console.log(dt.format_delay_table_pretty(diff, opts.dt_frac_digits, opts.dt_use_colour, opts.dt_version_out, opts.dt_allow_wrap))
+        break
+      case 'bin':
+        fmap(buf => process.stdout.write(new Uint8Array(buf)), dt.serialise_delay_table(diff))
+        break
+      default:
+        console.log(dt.format_delay_table_pretty(diff))
+        break  
+    }
   } else {
-    dt.print_delay_table(table, null, opts, meta)
+    switch(opts.format_out) {
+      case 'csv':
+        console.log(dt.format_delay_table_csv(table))
+        break
+      case 'pretty':
+        console.log(dt.format_delay_table_pretty(table, opts.dt_frac_digits, opts.dt_use_colour, opts.dt_version_out, opts.dt_allow_wrap))
+        break
+      case 'bin':
+        fmap(buf => process.stdout.write(new Uint8Array(buf)), dt.serialise_delay_table(table))
+        break
+      default:
+        console.log(dt.format_delay_table_pretty(table))
+        break  
+    }
   }
 
   return ok()
 }
 
-async function runInfo(filename, opts) {
+async function runInfo(filename: string, opts: any) {
   const loadResult = await load_subfile(filename)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
     return
   }
-  const meta = loadResult.meta
+  const meta = loadResult.value.meta
   Object.entries(meta).forEach(([k, v]) => {
     console.log(`${k}: ${v}`)
   })
@@ -253,52 +266,52 @@ async function runInfo(filename, opts) {
 }
 
 
-async function runRepoint(infilename, outfilename, opts) {
+async function runRepoint(infilename: string, outfilename: string, opts: any) {
   const loadResult = await load_subfile(infilename)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta, cache} = loadResult
+  const {file, meta, cache} = loadResult.value
 
-  const headerResult = await read_section('header', file, meta)
-  const dtResult =     await read_section('dt', file, meta)
-  const udpmapResult = await read_section('udpmap', file, meta)
-  const marginResult = await read_section('margin', file, meta)
-  if(headerResult.status != 'ok') return headerResult
-  if(dtResult.status != 'ok') return dtResult
-  if(udpmapResult.status != 'ok') return udpmapResult
-  if(marginResult.status != 'ok') return marginResult
-
+  const sectionsResult = await await_all([
+    read_section('header', file, meta, cache),
+    read_section('dt', file, meta, cache),
+    read_section('udpmap', file, meta, cache),
+    read_section('margin', file, meta, cache)
+  ])
+  if(!is_ok(sectionsResult))
+    return fail_with(sectionsResult)
+  const [headerBuf, dtBuf, udpmapBuf, marginBuf] = sectionsResult.value
+  
   const dtMeta = init_metadata()
   dtMeta.filename = opts.delay_table_filename
-  const loadDtResult = await dt.load_delay_table(opts.delay_table_filename, {format_in: 'auto'}, dtMeta)
+  const loadDtResult = await dt.load_delay_table(opts.delay_table_filename)
   if(loadDtResult.status != 'ok') {
     console.error(loadDtResult.reason)
     return
   }
-  const origDtResult = dt.parse_delay_table_binary(dtResult.buf, meta)
-  if(origDtResult.status != 'ok') {
-    console.error(origDtResult.reason)
-    return
-  }
-  const origDt = origDtResult.value
-  const newDt = loadDtResult.value
-  const newDtBin = dt.serialise_delay_table(newDt, meta.num_sources, meta.num_frac_delays, meta.frac_delay_size)
 
-  const outputMeta = { ...meta, filename: outfilename}
-  const outputDescriptor = {
+  const origDt = meta.delay_table
+  const newDt = loadDtResult.value
+  const newDtBinResult = dt.serialise_delay_table(newDt)
+  if(!is_ok(newDtBinResult))
+    return newDtBinResult
+  const newDtBin = newDtBinResult.value
+
+  const outputMeta: Metadata = { ...meta, filename: outfilename}
+  const outputDescriptor: OutputDescriptor = {
     meta: outputMeta,
     repoint: {
       from: origDt,
       to: newDt,
-      margin: new Uint16Array(marginResult.buf),
+      margin: new Uint16Array(marginBuf),
     },
     sections: {
-      header: { content: headerResult.buf, type: 'buffer' },
+      header: { content: headerBuf, type: 'buffer' },
       dt: { content: newDtBin, type: 'buffer' },
-      udpmap: { content: udpmapResult.buf, type: 'buffer' },
-      margin: { content: marginResult.buf, type: 'buffer' },
+      udpmap: { content: udpmapBuf, type: 'buffer' },
+      margin: { content: marginBuf, type: 'buffer' },
       data: { file, type: 'file' },
     },
   }
@@ -309,28 +322,28 @@ async function runRepoint(infilename, outfilename, opts) {
   return {status: 'ok'}
 }
 
-async function runReplace(infilename: string, outfilename: string, opts) {
+async function runReplace(infilename: string, outfilename: string, opts: any) {
   const loadResult = await load_subfile(infilename)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta, cache} = loadResult
-
-  const headerResult = await read_section('header', file, meta)
-  const dtResult =     await read_section('dt', file, meta)
-  const udpmapResult = await read_section('udpmap', file, meta)
-  const marginResult = await read_section('margin', file, meta)
-  if(headerResult.status != 'ok') return headerResult
-  if(dtResult.status != 'ok') return dtResult
-  if(udpmapResult.status != 'ok') return udpmapResult
-  if(marginResult.status != 'ok') return marginResult
+  const {file, meta, cache} = loadResult.value
+  const sectionsResult = await await_all([
+    read_section('header', file, meta, cache),
+    read_section('dt', file, meta, cache),
+    read_section('udpmap', file, meta, cache),
+    read_section('margin', file, meta, cache)
+  ])
+  if(!is_ok(sectionsResult))
+    return fail_with(sectionsResult)
+  const [headerBuf, dtBuf, udpmapBuf, marginBuf] = sectionsResult.value
 
   const origMap: SourceMap = Object.fromEntries(meta.sources.map((x, i) => [x, i]))
   const remap: SourceMap = Object.fromEntries(meta.sources.map((x, i) => [x, i]))
   if(opts.replace_map_all != null) {
     for(let [k,v] of Object.entries(remap))
-      remap[k] = origMap[opts.replace_map_all]
+      remap[Number.parseInt(k)] = origMap[opts.replace_map_all]
   } else
     for(let [k,v] of opts.replace_map)
       remap[k] = origMap[v]
@@ -341,10 +354,10 @@ async function runReplace(infilename: string, outfilename: string, opts) {
     meta: outputMeta,
     remap,
     sections: {
-      header: { content: headerResult.buf, type: 'buffer' },
-      dt: { content: dtResult.buf, type: 'buffer' },
-      udpmap: { content: udpmapResult.buf, type: 'buffer' },
-      margin: { content: marginResult.buf, type: 'buffer' },
+      header: { content: headerBuf, type: 'buffer' },
+      dt: { content: dtBuf, type: 'buffer' },
+      udpmap: { content: udpmapBuf, type: 'buffer' },
+      margin: { content: marginBuf, type: 'buffer' },
       data: { file, type: 'file' },
     },
   }
@@ -355,35 +368,32 @@ async function runReplace(infilename: string, outfilename: string, opts) {
   return {status: 'ok'}
 }
 
-async function runResample(infilename: string, outfilename: string, opts) {
+async function runResample(infilename: string, outfilename: string, opts: any) {
   const loadResult = await load_subfile(infilename)
   if(loadResult.status != 'ok') {
     console.error(loadResult.reason)
     return
   }
-  const {file, meta, cache} = loadResult
+  const {file, meta, cache} = loadResult.value
+  const sectionsResult = await await_all([
+    read_section('header', file, meta, cache),
+    read_section('dt', file, meta, cache),
+    read_section('udpmap', file, meta, cache),
+    read_section('margin', file, meta, cache)
+  ])
+  if(!is_ok(sectionsResult))
+    return fail_with(sectionsResult)
+  const [headerBuf, dtBuf, udpmapBuf, marginBuf] = sectionsResult.value
 
-  const headerResult = await read_section('header', file, meta)
-  const dtResult =     await read_section('dt', file, meta)
-  const udpmapResult = await read_section('udpmap', file, meta)
-  const marginResult = await read_section('margin', file, meta)
-  if(headerResult.status != 'ok') return headerResult
-  if(dtResult.status != 'ok') return dtResult
-  if(udpmapResult.status != 'ok') return udpmapResult
-  if(marginResult.status != 'ok') return marginResult
-
-  // Get delay table for looking up source indices
-  const dtParseResult = dt.parse_delay_table_binary(dtResult.buf, meta, 0)
-  if(dtParseResult.status != 'ok') return dtParseResult
-  const delayTable = dtParseResult.value
+  const delayTable = meta.delay_table
 
   const rules: TransformerSet = {}
   for(let spec of opts.resample_rules) {
     const result = make_resampler_transform(spec.name, spec.args)
     if(result.status != 'ok')
-      return fail(result.reason)
+      return fail_with(result)
     for(let source of spec.sources) {
-      const idx = delayTable.findIndex(row => row.rf_input == source)
+      const idx = delayTable.entries.findIndex(row => row.rf_input == source)
       if(idx == -1)
         return fail(`RF Source ID ${source} not found in subfile.`)
       rules[idx] = result.value
@@ -398,10 +408,10 @@ async function runResample(infilename: string, outfilename: string, opts) {
       region: opts.resample_region,
     },
     sections: {
-      header: { content: headerResult.buf, type: 'buffer' },
-      dt: { content: dtResult.buf, type: 'buffer' },
-      udpmap: { content: udpmapResult.buf, type: 'buffer' },
-      margin: { content: marginResult.buf, type: 'buffer' },
+      header: { content: headerBuf, type: 'buffer' },
+      dt: { content: dtBuf, type: 'buffer' },
+      udpmap: { content: udpmapBuf, type: 'buffer' },
+      margin: { content: marginBuf, type: 'buffer' },
       data: { file, type: 'file' },
     },
   }
@@ -413,13 +423,12 @@ async function runResample(infilename: string, outfilename: string, opts) {
   return {status: 'ok'}
 }
 
-async function runBake(ifname: string, opts): Promise<Result<void>> {
+async function runBake(ifname: string, opts: any): Promise<Result<void>> {
   const cache = cache_create(6 * 2 ** 30) // 6GB (whole subfile)
   const loadResult = await load_subfile(ifname, 'r+', cache)
   if(loadResult.status != 'ok')
-    return fail(loadResult.reason)
-  const {file} = loadResult
-  const meta: Metadata = loadResult.meta
+    return fail_with(loadResult)
+  const {file, meta} = loadResult.value
   process.stderr.write('Preloading sample data')
   for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
     await read_block(blockNum, file, meta, cache)
@@ -429,15 +438,16 @@ async function runBake(ifname: string, opts): Promise<Result<void>> {
   process.stderr.write(' done.\n')
   process.stderr.write('Baking delays for sources...')
   for(let lineNum=0; lineNum<meta.num_sources; lineNum++) {
-    const row = meta.delay_table[lineNum]
+    const row = meta.delay_table.entries[lineNum]
     if(opts.bake_source != null && !opts.bake_source.includes(row.rf_input))
       continue
     const extractResult = await extract_source(lineNum, false, file, meta, cache)
     if(extractResult.status != 'ok')
-      return fail(extractResult.reason)
+      return fail_with(extractResult)
     const idata = new Int8Array(extractResult.value)
     const odata = new Int8Array(idata.byteLength)
-    bake_delays(row.frac_delay, opts.bake_fft_size, idata, odata, meta)
+    throw 'luke you need to fix this'
+    //bake_delays(row.frac_delay, opts.bake_fft_size, idata, odata, meta)
     await overwrite_samples(lineNum, odata, meta, file)
     row.frac_delay.fill(0)
     process.stderr.write(` ${lineNum}`)
@@ -449,7 +459,7 @@ async function runBake(ifname: string, opts): Promise<Result<void>> {
   return ok()
 }
 
-async function runPatch(pfname: string, sfname: string, opts): Promise<Result<void>> {
+async function runPatch(pfname: string, sfname: string, opts: any): Promise<Result<void>> {
   if(opts.patch_section == null)
     return fail(`Section to patch must be specified (--section=SECTION).`)
   if(opts.patch_section != 'dt')
@@ -457,31 +467,29 @@ async function runPatch(pfname: string, sfname: string, opts): Promise<Result<vo
 
   const subLoadResult = await load_subfile(sfname, 'r+')
   if(subLoadResult.status != 'ok')
-    return fail(subLoadResult.reason)
-  const {file} = subLoadResult
-  const meta: Metadata = subLoadResult.meta
+    return fail_with(subLoadResult)
+  const {file, meta} = subLoadResult.value
 
-  const patchLoadResult = await dt.load_delay_table(pfname, {format_in: 'auto'}, meta)
+  const patchLoadResult = await dt.load_delay_table(pfname)
   if(patchLoadResult.status != 'ok')
-    return fail(patchLoadResult.reason)
+    return fail_with(patchLoadResult)
 
   const writeResult = await overwrite_delay_table(patchLoadResult.value, meta, file)
   if(writeResult.status != 'ok')
-    return fail(writeResult.reason)
+    return fail_with(writeResult)
 
   console.warn(`Patched delay table in ${sfname} at 0x${meta.dt_offset.toString(16)} (${meta.dt_length} bytes).`)
   return ok()
 }
 
-async function runUpgrade(fname: string, opts): Promise<Result<void>> {
+async function runUpgrade(fname: string, opts: any): Promise<Result<void>> {
   const loadResult = await load_subfile(fname, 'r+')
   if(loadResult.status != 'ok')
-    return fail(loadResult.reason)
-  const {file, cache} = loadResult
-  const meta: Metadata = loadResult.meta
+    return fail_with(loadResult)
+  const {file, meta, cache} = loadResult.value
   const result = await upgrade_delay_table(file, meta, cache)
   if(result.status != 'ok')
-    return fail(result.reason)
+    return fail_with(result)
   console.warn(`Upgraded fractional delay precision for ${fname}.`)
   return ok()
 }
