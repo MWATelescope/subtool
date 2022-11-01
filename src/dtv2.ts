@@ -218,18 +218,20 @@ function parse_delay_table_csv(buf: ArrayBuffer): Result<DelayTableV2> {
     const r = result as {location:string[]}
     return fail(`Error parsing CSV at row ${r.location[0]}, col ${r.location[1]}: ${result.reason}`)
   }
+  const num_fracs = result.value[1].frac_delay.length
+  console.warn(`Detected V${detection.value} CSV delay table with ${result.value.length} sources and ${num_fracs} fractional delays.`)
   return ok({
     entries: result.value,
     format_version: detection.value,
-    num_fracs: result.value[0].frac_delay.length,
+    num_fracs,
   })
 }
 
 function parse_delay_table_entry_csv_v1(row: string[]): Result<DelayTableV2Entry> {
   const fixedParsers = [parse_uint, parse_int, parse_int, parse_int, parse_int, parse_uint]
   const result = all([
-    ...apply_each(row.slice(0, 10), fixedParsers),
-    ...row.slice(10).map(parse_float)
+    ...apply_each(row.slice(0, 6), fixedParsers),
+    ...row.slice(6).map(parse_float)
   ])
   if(!is_ok(result))
     return fail_with(result)
@@ -349,6 +351,7 @@ function infer_binary_structure(buf: ArrayBuffer): Result<[number, number, numbe
     if(!is_ok(check))
       continue
     const frac_count = check.value
+    console.warn(`Detected V${detection.value} binary delay table with ${row_count} sources and ${frac_count} fractional delays.`)
     return ok([detection.value, row_count, frac_count])
   }
   return fail('Failed to determine binary delay table structure.')
