@@ -1,10 +1,12 @@
-import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor } from './types'
-import { read_block } from './util.js'
+import type { Metadata, OutputDescriptor, SectionDescriptor, RepointDescriptor, DelayTableV2 } from './types'
+import type { Cache } from './cache'
+import { read_block } from './reader.js'
+import {FileHandle} from 'fs/promises';
 
-export async function write_time_shifted_data(from, to, margin, infile, outfile, meta) {
+export async function write_time_shifted_data(from: DelayTableV2, to: DelayTableV2, margin, infile: FileHandle, outfile: FileHandle, meta: Metadata, cache: Cache) {
   let bytesWritten = 0;
-  const curDelays = from.map(row => row.ws_delay)
-  const newDelays = to.map(row => row.ws_delay)
+  const curDelays = from.entries.map(row => row.ws_delay)
+  const newDelays = to.entries.map(row => row.ws_delay)
   
   let blockBuf:     ArrayBuffer = new ArrayBuffer(meta.block_length)
   let outBlock:     Uint16Array = new Uint16Array(blockBuf)
@@ -12,21 +14,21 @@ export async function write_time_shifted_data(from, to, margin, infile, outfile,
   let currentBlock: Uint16Array | null = null
   let nextBlock:    Uint16Array | null = null 
   
-  let firstBlockResult = await read_block(1, infile, meta)
+  let firstBlockResult = await read_block(1, infile, meta, cache)
   if(firstBlockResult.status != 'ok')
     return firstBlockResult
   
-  nextBlock = new Uint16Array(firstBlockResult.buf)
+  nextBlock = new Uint16Array(firstBlockResult.value)
   
   for(let blockNum=1; blockNum<=meta.blocks_per_sub; blockNum++) {
     lastBlock = currentBlock
     currentBlock = nextBlock
   
     if(blockNum < meta.blocks_per_sub) {
-      let nextBlockResult = await read_block(blockNum+1, infile, meta)
+      let nextBlockResult = await read_block(blockNum+1, infile, meta, cache)
       if(nextBlockResult.status != 'ok')
         return nextBlockResult
-      nextBlock = new Uint16Array(nextBlockResult.buf)
+      nextBlock = new Uint16Array(nextBlockResult.value)
     }
   
     time_shift(blockNum, currentBlock, lastBlock, nextBlock, outBlock, curDelays, newDelays, margin, meta)

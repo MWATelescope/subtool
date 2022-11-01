@@ -294,6 +294,7 @@ async function runRepoint(infilename: string, outfilename: string, opts: any) {
 
   const origDt = meta.delay_table
   const newDt = loadDtResult.value
+  newDt.format_version = origDt.format_version
   const newDtBinResult = dt.serialise_delay_table(newDt)
   if(!is_ok(newDtBinResult))
     return newDtBinResult
@@ -473,6 +474,9 @@ async function runPatch(pfname: string, sfname: string, opts: any): Promise<Resu
   const patchLoadResult = await dt.load_delay_table(pfname)
   if(patchLoadResult.status != 'ok')
     return fail_with(patchLoadResult)
+  if(patchLoadResult.value.format_version != meta.mwax_sub_version)
+    console.warn(`Warning: patching a V${meta.mwax_sub_version} subfile with a V${patchLoadResult.value.format_version} delay table. The delay table will be converted.`)
+  patchLoadResult.value.format_version = meta.mwax_sub_version
 
   const writeResult = await overwrite_delay_table(patchLoadResult.value, meta, file)
   if(writeResult.status != 'ok')

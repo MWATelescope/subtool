@@ -188,7 +188,7 @@ export async function write_subfile(output_descriptor: OutputDescriptor, opts, c
         process.stderr.write(`${blockNum} `)
        }
     } else if(repoint) {
-      const repointResult: any = await rp.write_time_shifted_data(repoint.from, repoint.to, repoint.margin, sections.data.file, file, meta)
+      const repointResult: any = await rp.write_time_shifted_data(repoint.from, repoint.to, repoint.margin, sections.data.file, file, meta, cache)
       if(repointResult.status != 'ok')
         return repointResult
       bytesWritten += repointResult.bytesWritten
@@ -254,6 +254,8 @@ export async function overwrite_line(lineNum: number, blockNum: number, samples:
 
 /** Overwrite the delay table. */
 export async function overwrite_delay_table(table: DelayTableV2, meta: Metadata, file: FileHandle): Promise<Result<void>> {
+  if(table.format_version != meta.mwax_sub_version)
+    return fail(`Refusing to overwrite the delay table in a version ${meta.mwax_sub_version} subfile with a version ${table.format_version} delay table.`)
   const result = dtv2.serialise_delay_table(table)
   if(!is_ok(result))
     return fail_with(result)
