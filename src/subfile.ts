@@ -344,7 +344,11 @@ export async function resample_metadata(factor: number, ofname:string, context: 
 
   // Write the new header
   const headerBuf = serialise_header(header, meta)
-  const writeResult = await overwrite_section('header', headerBuf, meta, file)
+  
+  let writeResult = await overwrite_section('header', headerBuf, meta, file)
+  if(writeResult.status != 'ok')
+    return fail_with(writeResult)
+  writeResult = await overwrite_delay_table(meta.delay_table, meta, file)
   if(writeResult.status != 'ok')
     return fail_with(writeResult)
 
