@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import { parse_command_line } from './cli.js'
 import * as dt from './dtv2.js'
 import * as dump from './dump.js'
-import { load_subfile, overwrite_delay_table, overwrite_samples, upgrade_delay_table, write_subfile } from './subfile.js'
+import { load_subfile, overwrite_delay_table, overwrite_samples, resample_metadata, upgrade_delay_table, write_subfile } from './subfile.js'
 import { print_header, parse_header, read_header, serialise_header, set_header_value } from './header.js'
 import { init_metadata, write_section, ok, fail, is_ok, fail_with, async_arrow, fmap, await_all } from './util.js'
 import type { Metadata, OutputDescriptor, Result, SourceMap, TransformerSet, TransformSpec } from './types'
@@ -10,8 +10,8 @@ import { FileHandle } from 'node:fs/promises'
 import {make_phase_gradient_resampler, make_resampler_transform} from './resample.js'
 import {cache_create, print_cache_stats} from './cache.js'
 import {extract_source} from './dump.js'
-import {bake_delays} from './dsp.js'
-import {read_block, read_section} from './reader.js'
+import {bake_delays, upsample} from './dsp.js'
+import {read_block, read_line, read_section} from './reader.js'
 
 
 async function main(args: string[]) {
@@ -46,6 +46,8 @@ async function main(args: string[]) {
     return runPatch(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case 'upgrade':
     return runUpgrade(parseResult.fixedArgs[0], parseResult.opts)
+  case 'upsample':
+    return runUpsample(parseResult.fixedArgs[0], parseResult.fixedArgs[1], parseResult.opts)
   case null:
     return ok()
   default:
@@ -422,6 +424,39 @@ async function runResample(infilename: string, outfilename: string, opts: any) {
   console.warn(`Wrote ${writeResult.bytesWritten} bytes to ${outfilename}.`)
 
   return {status: 'ok'}
+}
+
+async function runUpsample(ifname: string, ofname: string, opts: any): Promise<Result<void>> {
+  const factor = opts.upsample_factor
+  const cache = cache_create(2 ** 30) 
+  const loadResult = await load_subfile(ifname, 'r', cache)
+  if(loadResult.status != 'ok')
+    return fail_with(loadResult)
+  const oldContext = loadResult.value
+  const createResult = await resample_metadata(factor, ofname, oldContext)
+  if(createResult.status != 'ok')
+    return fail_with(createResult)
+  const newContext = createResult.value
+  const outputLineLength = newContext.meta.sub_line_size * newContext.meta.blocks_per_sub
+
+  // Interate sources, resample and write source by source
+  process.stderr.write('Upsampling sources...')
+  for(let lineNum=0; lineNum<oldContext.meta.num_sources; lineNum++) {
+    const extractResult = await extract_source(lineNum, false, oldContext.file, oldContext.meta, cache)
+    if(extractResult.status != 'ok')
+      return fail_with(extractResult)
+    
+    const idata = new Int8Array(extractResult.value)
+    const odata = new Int8Array(outputLineLength)
+
+    upsample(idata, odata, newContext.meta, factor)
+    await overwrite_samples(lineNum, odata, newContext.meta, newContext.file)
+    
+    process.stderr.write(` ${lineNum}`)
+  }
+  process.stderr.write(' ...done.\n')
+  newContext.file.close()
+  return ok()
 }
 
 async function runBake(ifname: string, opts: any): Promise<Result<void>> {

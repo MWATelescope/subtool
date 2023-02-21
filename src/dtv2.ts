@@ -569,3 +569,15 @@ export function compare_delay_tables(from: DelayTableV2, to: DelayTableV2): Resu
 //function flip_fracs(table: DelayTable): DelayTable {
 //  return table.map(row => ({ ...row, frac_delay: row.frac_delay.map(x => -x) }))
 //}
+
+
+/** Clone a delay table. */
+export function clone_delay_table(dt: DelayTableV2): DelayTableV2 {
+  return {...dt, entries: dt.entries.map(clone_delay_table_entry)}
+}
+
+/** Clone a delay table entry. */
+export function clone_delay_table_entry(dte: DelayTableV2Entry): DelayTableV2Entry {
+  return {...dte, frac_delay: dte.frac_delay.slice()}
+}
+

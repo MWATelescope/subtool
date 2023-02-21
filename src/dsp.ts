@@ -29,6 +29,14 @@ export function bake_delays(delays: Int32Array, fftsize: number, idata: Int8Arra
   return ok()
 }
 
+export function upsample(idata: Int8Array, odata: Int8Array, meta: Metadata, factor: number): Result<void> {
+  const input_fft_size = 6400
+  const output_fft_size = input_fft_size * factor
+  const filter = make_upsampling_filter(input_fft_size, output_fft_size)
+  apply_resizing_block_transform(filter, input_fft_size, output_fft_size, idata, odata)
+  return ok()
+}
+
 function apply_block_transform(fn: BlockTransform, size: number, idata: Int8Array, odata: Int8Array): void {
   //if(idata.length % size != 0)
   //  console.warn(`Warning: applying block transform to data that is not a multiple in length of the block size.`)
@@ -40,6 +48,16 @@ function apply_block_transform(fn: BlockTransform, size: number, idata: Int8Arra
     fn(iblock, oblock, i)
   }
   //throw "bang"
+}
+
+/** Apply a block transform with different input and output block sizes. */
+function apply_resizing_block_transform(fn: BlockTransform, isize: number, osize: number, idata: Int8Array, odata: Int8Array): void {
+  const nblocks = Math.floor(idata.length / (2*isize))
+  for(let i=0; i<nblocks; i++) {
+    const iblock = idata.subarray(i*isize*2, (i+1)*isize*2)
+    const oblock = odata.subarray(i*osize*2, (i+1)*osize*2)
+    fn(iblock, oblock, i)
+  }
 }
 
 function make_band_pass_filter(fmin: number, fmax: number, bandwidth: number, fftsize: number): BlockTransform {
@@ -106,3 +124,31 @@ function generate_complex_noise(idata: Int8Array, odata: Int8Array) {
   }  
 }
 
+/** Apply upsampling.
+ * 
+ * This filter takes a stream of data and FFTs chunks of it, extends the range of
+ * frequencies, and then inverse-FFT's the result. This is useful for increasing
+ * the sample rate of a signal without introducing high-frequency noise.
+ * 
+ * fft_in:  Number of points in input FFT.
+ * fft_out: Number of points in output inverse-FFT.
+ */
+function make_upsampling_filter(fft_size_in: number, fft_size_out: number) {
+  const input_fft = new FFT(fft_size_in)
+  const output_fft = new FFT(fft_size_out)
+  const istorage = input_fft.createComplexArray()
+  const ostorage = output_fft.createComplexArray()
+  function filter(idata: Int8Array, odata: Int8Array, blockIdx: number): void {
+    input_fft.transform(istorage, idata)
+    for(let sampleIdx=0; sampleIdx < fft_size_in; sampleIdx++) {
+      const freq = sampleIdx / fft_size_in
+      const newFreq = freq * fft_size_out / fft_size_in
+      const newSampleIdx = Math.floor(newFreq * fft_size_in)
+      ostorage[newSampleIdx*2] = istorage[sampleIdx*2]
+      ostorage[newSampleIdx*2+1] = istorage[sampleIdx*2+1]
+    }
+    output_fft.inverseTransform(ostorage, istorage)
+    odata.set(ostorage)
+  }
+  return filter
+}

@@ -150,6 +150,15 @@ Upgrade a subfile to use microsample fractional delays.
       subtool upgrade <FILE>
   
   FILE                    Path to subfile.
+
+UPSAMPLE COMMAND (upsample)
+Write a new subfile, upsampled by a factor of N.
+
+      subtool upsample [upsample_opts] <INPUT_FILE> <OUTPUT_FILE>
+
+  INPUT_FILE              Path to input subfile. 
+  OUTPUT_FILE             Path to write output subfile.
+  --factor=N              Upsample factor (default: 1.28).
 `
 /*
 SIGNAL PROCESSOR COMMAND (dsp)
@@ -433,6 +442,18 @@ const schema = {
     opts: {
     },
     defaults: {
+    },
+  },
+  upsample: {
+    args: ["INPUT_FILE", "OUTPUT_FILE"],
+    opts: {
+      "--factor": {
+        type: "number",
+        prop: "upsample_factor",
+      },
+    },
+    defaults: {
+      upsample_factor: 1.28,
     },
   },
   /*dsp: {

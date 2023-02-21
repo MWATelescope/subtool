@@ -66,11 +66,11 @@
 import * as fs from 'node:fs/promises'
 import { FileHandle } from 'fs/promises'
 import * as dtv2 from './dtv2.js'
-import { read_header, serialise_header, set_header_value } from './header.js'
+import { clone_header, read_header, serialise_header, set_header_value } from './header.js'
 import { all, async_bind, await_all, fail, fail_with, init_metadata, is_ok, ok } from './util.js'
 import * as rp from './repoint.js'
 import * as rs from './resample.js'
-import type { DelayTableV2, Metadata, OutputDescriptor, Result, SourceMap } from './types'
+import type { DelayTableV2, DelayTableV2Entry, Metadata, OutputDescriptor, Result, SourceMap } from './types'
 import type { Cache } from './cache'
 import {cache_create} from './cache.js'
 import {read_block, read_section} from './reader.js'
@@ -244,6 +244,8 @@ export async function overwrite_samples(lineNum: number, samples: Int8Array, met
   return ok()
 }
 
+
+
 /** Overwrite the samples for a given line and *zero-indexed* data block ID. */
 export async function overwrite_line(lineNum: number, blockNum: number, samples: Int8Array, meta: Metadata, file: FileHandle): Promise<Result<void>> {
   const position = meta.data_offset + blockNum * meta.block_length + lineNum * meta.sub_line_size
@@ -318,3 +320,39 @@ export async function upgrade_delay_table(file: FileHandle, meta: Metadata, cach
   
   return ok()
 }
+
+/** Create a new subfile context based on an existing one with a different sample rate. 
+ * 
+ * Does not write out the data section.
+ */
+export async function resample_metadata(factor: number, ofname:string, context: SubfileContext): Promise<Result<SubfileContext>> {
+  const meta = clone_metadata(context.meta)
+  const header = clone_header(context.header)
+  header.NTIMESAMPLES *= factor
+  header.SAMPLE_RATE *= factor
+  header.TRANSFER_SIZE *= factor
+  meta.sample_rate *= factor
+  meta.samples_per_line *= factor
+  meta.sub_line_size = meta.samples_per_line * 2
+  meta.block_length = meta.sub_line_size * meta.num_sources
+  meta.data_offset = meta.header_length + meta.block_length
+  meta.data_length = meta.block_length * meta.blocks_per_sub
+  meta.udp_per_rf_per_sub = meta.sample_rate * meta.secs_per_subobs / meta.samples_per_packet
+  const file = await fs.open(ofname, 'w')
+  file.truncate(meta.data_offset + meta.data_length)
+  const newContext = {file, meta, header, cache: cache_create(2 ** 30)}
+
+  // Write the new header
+  const headerBuf = serialise_header(header, meta)
+  const writeResult = await overwrite_section('header', headerBuf, meta, file)
+  if(writeResult.status != 'ok')
+    return fail_with(writeResult)
+
+  return ok(newContext)
+}
+
+/** Clone a metadata object. */
+export function clone_metadata(meta: Metadata): Metadata {
+  return {...meta, sources: [...meta.sources], delay_table: dtv2.clone_delay_table(meta.delay_table)}
+}
+

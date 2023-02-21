@@ -118,3 +118,6 @@ export function serialise_header(header, meta: Metadata): ArrayBuffer {
     .padEnd(meta.header_length, '\0')).buffer
 }
 
+export function clone_header(header) {
+  return {...header}
+}
