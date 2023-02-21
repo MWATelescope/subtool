@@ -441,7 +441,7 @@ async function runUpsample(ifname: string, ofname: string, opts: any): Promise<R
 
   // Interate sources, resample and write source by source
   process.stderr.write('Upsampling sources...')
-  for(let lineNum=0; lineNum<oldContext.meta.num_sources; lineNum++) {
+  for(let lineNum=0; lineNum<1; lineNum++) {
     const extractResult = await extract_source(lineNum, false, oldContext.file, oldContext.meta, cache)
     if(extractResult.status != 'ok')
       return fail_with(extractResult)

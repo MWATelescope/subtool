@@ -136,10 +136,11 @@ function generate_complex_noise(idata: Int8Array, odata: Int8Array) {
 function make_upsampling_filter(fft_size_in: number, fft_size_out: number) {
   const input_fft = new FFT(fft_size_in)
   const output_fft = new FFT(fft_size_out)
-  const istorage = input_fft.createComplexArray()
+  const istorage = output_fft.createComplexArray()
   const ostorage = output_fft.createComplexArray()
   function filter(idata: Int8Array, odata: Int8Array, blockIdx: number): void {
     input_fft.transform(istorage, idata)
+    
     //for(let sampleIdx=0; sampleIdx < fft_size_in; sampleIdx++) {
     //  const freq = sampleIdx / fft_size_in
     //  const newFreq = freq * fft_size_out / fft_size_in
