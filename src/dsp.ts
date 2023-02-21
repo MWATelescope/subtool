@@ -30,8 +30,8 @@ export function bake_delays(delays: Int32Array, fftsize: number, idata: Int8Arra
 }
 
 export function upsample(idata: Int8Array, odata: Int8Array, meta: Metadata, factor: number): Result<void> {
-  const input_fft_size = 6400
-  const output_fft_size = input_fft_size * factor
+  const input_fft_size = 4096
+  const output_fft_size = 8192
   const filter = make_upsampling_filter(input_fft_size, output_fft_size)
   apply_resizing_block_transform(filter, input_fft_size, output_fft_size, idata, odata)
   return ok()
@@ -140,13 +140,13 @@ function make_upsampling_filter(fft_size_in: number, fft_size_out: number) {
   const ostorage = output_fft.createComplexArray()
   function filter(idata: Int8Array, odata: Int8Array, blockIdx: number): void {
     input_fft.transform(istorage, idata)
-    for(let sampleIdx=0; sampleIdx < fft_size_in; sampleIdx++) {
-      const freq = sampleIdx / fft_size_in
-      const newFreq = freq * fft_size_out / fft_size_in
-      const newSampleIdx = Math.floor(newFreq * fft_size_in)
-      ostorage[newSampleIdx*2] = istorage[sampleIdx*2]
-      ostorage[newSampleIdx*2+1] = istorage[sampleIdx*2+1]
-    }
+    //for(let sampleIdx=0; sampleIdx < fft_size_in; sampleIdx++) {
+    //  const freq = sampleIdx / fft_size_in
+    //  const newFreq = freq * fft_size_out / fft_size_in
+    //  const newSampleIdx = Math.floor(newFreq * fft_size_in)
+    //  ostorage[newSampleIdx*2] = istorage[sampleIdx*2]
+    //  ostorage[newSampleIdx*2+1] = istorage[sampleIdx*2+1]
+    //}
     output_fft.inverseTransform(ostorage, istorage)
     odata.set(ostorage)
   }

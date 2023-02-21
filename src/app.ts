@@ -437,7 +437,7 @@ async function runUpsample(ifname: string, ofname: string, opts: any): Promise<R
   if(createResult.status != 'ok')
     return fail_with(createResult)
   const newContext = createResult.value
-  const outputLineLength = newContext.meta.sub_line_size * newContext.meta.blocks_per_sub
+  const outputLineLength = newContext.meta.sub_line_size * newContext.meta.blocks_per_sub * 2
 
   // Interate sources, resample and write source by source
   process.stderr.write('Upsampling sources...')
