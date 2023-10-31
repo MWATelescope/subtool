@@ -90,6 +90,7 @@ Read and write delay table files, select subsets and compare between them.
                             pretty   Table aligned values with headings.
                             csv      Comma-separated values.
                             bin      Raw binary data.
+  --version-out=N         Force output compatible with subfile spec version N.
 
 DUMP COMMAND (dump)
 Write binary contents of a subfile section to a file.
@@ -151,6 +152,15 @@ Upgrade a subfile to use microsample fractional delays.
       subtool upgrade <FILE>
   
   FILE                    Path to subfile.
+
+UPSAMPLE COMMAND (upsample)
+Write a new subfile, upsampled by a factor of N.
+
+      subtool upsample [upsample_opts] <INPUT_FILE> <OUTPUT_FILE>
+
+  INPUT_FILE              Path to input subfile. 
+  OUTPUT_FILE             Path to write output subfile.
+  --factor=N              Upsample factor (default: 1.28).
 ```
 
 ## INSTALL
@@ -159,7 +169,7 @@ subtool is developed with NodeJS v18.10.0. Newer versions are expected to work,
 older versions may also work.
 
 ```
-$  git clone https://github.com/shmookey/subtool.git
+$  git clone https://github.com/MWATelescope/subtool.git
 $  cd subtool
 $  npm install
 $  npm run build
