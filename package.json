@@ -28,6 +28,7 @@
     "typescript": "^4.8.3"
   },
   "dependencies": {
+    "browser-cjs": "^1.0.3",
     "fft.js": "^4.0.4"
   }
 }
